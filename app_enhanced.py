@@ -390,6 +390,59 @@ div[data-testid="stMetricLabel"] { color: #94a3b8 !important; font-size: 0.75rem
 .stTextInput input { background: #1e293b !important; border: 1px solid #334155 !important; color: #f1f5f9 !important; }
 .stInfo { background: rgba(139, 92, 246, 0.1) !important; border: 1px solid rgba(139, 92, 246, 0.3) !important; }
 .stInfo p { color: #e0e7ff !important; }
+
+/* Reader Mode */
+.reader-container {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.reader-text {
+    color: #e2e8f0 !important;
+    font-size: 1.1rem;
+    line-height: 1.8;
+    font-family: Georgia, 'Times New Roman', serif;
+}
+
+.reader-controls {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.tts-btn {
+    background: linear-gradient(135deg, #8b5cf6, #a855f7) !important;
+    color: white !important;
+    border: none !important;
+    padding: 0.5rem 1rem !important;
+    border-radius: 8px !important;
+    cursor: pointer;
+    font-size: 0.9rem !important;
+}
+
+.tts-btn:hover {
+    opacity: 0.9;
+}
+
+.tts-btn.stop {
+    background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+}
+
+.reading-highlight {
+    background: rgba(139, 92, 246, 0.3);
+    border-radius: 4px;
+    padding: 0 2px;
+}
 </style>
 """
 
@@ -416,24 +469,30 @@ def extract_images_from_pdf(pdf_file) -> list:
         for page_num in range(pages_to_render):
             try:
                 page = doc[page_num]
-                # Render at 2x zoom for good quality
+                # Render at 2x zoom for good quality with alpha channel
                 mat = fitz.Matrix(2.0, 2.0)
-                pix = page.get_pixmap(matrix=mat)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+
+                # Convert to PNG bytes
                 img_data = pix.tobytes("png")
                 pil_image = Image.open(io.BytesIO(img_data))
+
+                # Ensure RGB mode
+                if pil_image.mode != 'RGB':
+                    pil_image = pil_image.convert('RGB')
 
                 img_count += 1
                 images.append({
                     'page': page_num + 1,
                     'index': img_count,
-                    'image': pil_image.convert('RGB'),
+                    'image': pil_image,
                     'width': pil_image.width,
                     'height': pil_image.height,
                     'type': 'page'
                 })
                 pix = None
             except Exception as e:
-                logger.debug(f"Page render failed for page {page_num}: {e}")
+                logger.warning(f"Page render failed for page {page_num}: {e}")
 
         # Second: Also try to extract embedded images (diagrams, photos)
         for page_num in range(min(len(doc), 15)):
@@ -448,13 +507,17 @@ def extract_images_from_pdf(pdf_file) -> list:
                             image_bytes = base_image["image"]
                             pil_image = Image.open(io.BytesIO(image_bytes))
 
+                            # Ensure RGB mode
+                            if pil_image.mode != 'RGB':
+                                pil_image = pil_image.convert('RGB')
+
                             # Only keep larger images (likely figures, not icons)
                             if pil_image.width > 150 and pil_image.height > 150:
                                 img_count += 1
                                 images.append({
                                     'page': page_num + 1,
                                     'index': img_count,
-                                    'image': pil_image.convert('RGB'),
+                                    'image': pil_image,
                                     'width': pil_image.width,
                                     'height': pil_image.height,
                                     'type': 'embedded'
@@ -910,6 +973,228 @@ def render_terms():
             st.rerun()
 
 
+def render_reader():
+    """Render the paper reader with text-to-speech functionality."""
+    text = st.session_state.text
+    images = st.session_state.images
+
+    st.markdown('<div class="section-title">📖 Read Paper</div>', unsafe_allow_html=True)
+
+    if not text:
+        st.info("No paper loaded. Upload a PDF to start reading.")
+        return
+
+    # Get page images for display
+    page_images = [img for img in images if img.get('type') == 'page']
+
+    # TTS JavaScript
+    tts_js = """
+    <script>
+    let speechSynthesis = window.speechSynthesis;
+    let currentUtterance = null;
+    let isPaused = false;
+
+    function speak(text) {
+        if (speechSynthesis.speaking) {
+            speechSynthesis.cancel();
+        }
+
+        currentUtterance = new SpeechSynthesisUtterance(text);
+        currentUtterance.rate = parseFloat(document.getElementById('tts-rate')?.value || 1);
+        currentUtterance.pitch = 1;
+
+        // Try to use a good voice
+        const voices = speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => v.name.includes('Google') || v.name.includes('Natural')) || voices[0];
+        if (preferredVoice) currentUtterance.voice = preferredVoice;
+
+        isPaused = false;
+        speechSynthesis.speak(currentUtterance);
+    }
+
+    function pauseResume() {
+        if (isPaused) {
+            speechSynthesis.resume();
+            isPaused = false;
+        } else {
+            speechSynthesis.pause();
+            isPaused = true;
+        }
+    }
+
+    function stopSpeaking() {
+        speechSynthesis.cancel();
+        isPaused = false;
+    }
+    </script>
+    """
+    st.components.v1.html(tts_js, height=0)
+
+    # View mode selector
+    view_mode = st.radio(
+        "View Mode:",
+        ["📄 Page View", "📝 Text View"],
+        horizontal=True,
+        key="reader_view_mode"
+    )
+
+    if view_mode == "📄 Page View" and page_images:
+        # Page view with rendered pages
+        st.markdown("---")
+
+        # Page selector
+        page_nums = [img['page'] for img in page_images]
+        col1, col2, col3 = st.columns([1, 2, 1])
+
+        with col1:
+            if st.button("◀ Previous", key="reader_prev", use_container_width=True):
+                current = st.session_state.get('reader_page', 1)
+                if current > 1:
+                    st.session_state.reader_page = current - 1
+                    st.rerun()
+
+        with col2:
+            current_page = st.session_state.get('reader_page', 1)
+            selected = st.selectbox(
+                "Page",
+                page_nums,
+                index=min(current_page - 1, len(page_nums) - 1),
+                format_func=lambda x: f"Page {x} of {len(page_nums)}",
+                key="reader_page_select",
+                label_visibility="collapsed"
+            )
+            st.session_state.reader_page = selected
+
+        with col3:
+            if st.button("Next ▶", key="reader_next", use_container_width=True):
+                current = st.session_state.get('reader_page', 1)
+                if current < len(page_nums):
+                    st.session_state.reader_page = current + 1
+                    st.rerun()
+
+        # Display current page
+        current_page = st.session_state.get('reader_page', 1)
+        for img_data in page_images:
+            if img_data['page'] == current_page:
+                st.image(img_data['image'], use_container_width=True)
+                break
+
+        # Read page button
+        if st.button("🔊 Read This Page Aloud", key="read_page_btn", use_container_width=True):
+            # Extract text for this page (approximate)
+            chars_per_page = len(text) // max(len(page_images), 1)
+            start = (current_page - 1) * chars_per_page
+            end = current_page * chars_per_page
+            page_text = text[start:end]
+
+            # Clean text for reading
+            page_text = re.sub(r'\s+', ' ', page_text).strip()
+            page_text = page_text[:3000]  # Limit length
+
+            st.components.v1.html(f"""
+            <script>
+            const text = `{page_text.replace('`', "'")}`;
+            if (window.speechSynthesis) {{
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                window.speechSynthesis.speak(utterance);
+            }}
+            </script>
+            <div style="padding: 10px; background: #1e293b; border-radius: 8px; color: #a78bfa;">
+                🔊 Reading page {current_page}... (use browser controls to stop)
+            </div>
+            """, height=50)
+
+    else:
+        # Text view
+        st.markdown("---")
+
+        # TTS Controls
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            if st.button("🔊 Read Aloud", key="tts_play", use_container_width=True):
+                # Get first 5000 chars for reading
+                read_text = text[:5000].replace('`', "'").replace('\n', ' ')
+                read_text = re.sub(r'\s+', ' ', read_text)
+
+                st.components.v1.html(f"""
+                <script>
+                const text = `{read_text}`;
+                if (window.speechSynthesis) {{
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    window.speechSynthesis.speak(utterance);
+                }}
+                </script>
+                """, height=0)
+                st.success("🔊 Reading started! Use browser to control playback.")
+
+        with col2:
+            if st.button("⏸️ Pause/Resume", key="tts_pause", use_container_width=True):
+                st.components.v1.html("""
+                <script>
+                if (window.speechSynthesis) {
+                    if (window.speechSynthesis.paused) {
+                        window.speechSynthesis.resume();
+                    } else {
+                        window.speechSynthesis.pause();
+                    }
+                }
+                </script>
+                """, height=0)
+
+        with col3:
+            if st.button("⏹️ Stop", key="tts_stop", use_container_width=True):
+                st.components.v1.html("""
+                <script>
+                if (window.speechSynthesis) {
+                    window.speechSynthesis.cancel();
+                }
+                </script>
+                """, height=0)
+                st.info("Stopped reading.")
+
+        with col4:
+            speed = st.select_slider("Speed", options=[0.5, 0.75, 1.0, 1.25, 1.5], value=1.0, key="tts_speed")
+
+        # Display text in reader format
+        st.markdown("---")
+
+        # Split into paragraphs for better reading
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+
+        # Paginate text
+        items_per_page = 5
+        total_pages = (len(paragraphs) + items_per_page - 1) // items_per_page
+        text_page = st.session_state.get('text_page', 0)
+
+        start_idx = text_page * items_per_page
+        end_idx = min(start_idx + items_per_page, len(paragraphs))
+
+        st.markdown(f'<div class="reader-container">', unsafe_allow_html=True)
+        for para in paragraphs[start_idx:end_idx]:
+            clean_para = sanitize_html(para)
+            st.markdown(f'<p class="reader-text">{clean_para}</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Pagination
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            if text_page > 0:
+                if st.button("← Previous Section", key="text_prev"):
+                    st.session_state.text_page = text_page - 1
+                    st.rerun()
+        with col2:
+            st.caption(f"Section {text_page + 1} of {total_pages}")
+        with col3:
+            if text_page < total_pages - 1:
+                if st.button("Next Section →", key="text_next"):
+                    st.session_state.text_page = text_page + 1
+                    st.rerun()
+
+
 def render_chat():
     """Render chat interface."""
     st.markdown('<div class="section-title">⚡ Quick Actions</div>', unsafe_allow_html=True)
@@ -970,17 +1255,21 @@ def main():
     if not st.session_state.processed:
         render_welcome()
     else:
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Chat", "📊 Overview", "📐 Equations", "🖼️ Figures", "📖 Terms"])
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "💬 Chat", "📖 Read", "📊 Overview", "📐 Equations", "🖼️ Figures", "📖 Terms"
+        ])
 
         with tab1:
             render_chat()
         with tab2:
-            render_overview()
+            render_reader()
         with tab3:
-            render_equations()
+            render_overview()
         with tab4:
-            render_figures()
+            render_equations()
         with tab5:
+            render_figures()
+        with tab6:
             render_terms()
 
 
