@@ -8,7 +8,7 @@ retrieval chains for question answering over documents.
 import logging
 from typing import Optional, List, Dict, Any
 
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 
@@ -80,21 +80,24 @@ class ConversationManager:
         try:
             # Initialize LLM
             llm = ChatOpenAI(
-                model_name=self.config.llm_model_name,
+                model=self.config.llm_model_name,
                 temperature=self.config.llm_temperature
             )
 
-            # Initialize conversation memory
+            # Initialize conversation memory with output_key for multi-output chains
             self._memory = ConversationBufferMemory(
                 memory_key='chat_history',
-                return_messages=True
+                return_messages=True,
+                output_key='answer'
             )
 
-            # Create the chain
+            # Create the chain with source document retrieval
             self._chain = ConversationalRetrievalChain.from_llm(
                 llm=llm,
                 retriever=vectorstore.as_retriever(),
-                memory=self._memory
+                memory=self._memory,
+                return_source_documents=True,
+                output_key='answer'
             )
 
             logger.info("Conversation chain created successfully")
