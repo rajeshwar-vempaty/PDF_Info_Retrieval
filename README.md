@@ -1,252 +1,272 @@
-# PDF Info Retrieval
+# 📚 PaperMind - AI-Powered Research Paper Analysis
 
-**Interactive PDF Knowledge Extraction System**
+<div align="center">
 
-A RAG (Retrieval-Augmented Generation) based application for extracting and querying information from PDF research documents. Upload your PDFs, and ask questions about their content using natural language.
+![PaperMind Banner](https://img.shields.io/badge/PaperMind-AI%20Research%20Assistant-8b5cf6?style=for-the-badge&logo=bookstack&logoColor=white)
 
-## Features
+[![Python](https://img.shields.io/badge/Python-3.9+-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-ff4b4b?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io)
+[![LangChain](https://img.shields.io/badge/LangChain-0.1.20-1c3c3c?style=flat-square)](https://langchain.com)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-412991?style=flat-square&logo=openai&logoColor=white)](https://openai.com)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-- **Multi-PDF Support**: Upload and process multiple PDF documents simultaneously
-- **Academic-Aware Processing**: Intelligent text chunking that respects research paper sections (Abstract, Introduction, Methods, Results, Discussion, Conclusion)
-- **Conversational Interface**: Ask follow-up questions with context maintained across the conversation
-- **Flexible Embeddings**: Choose between OpenAI or HuggingFace embedding models
-- **Smart Text Cleaning**: Removes noise like email addresses, figure captions, and non-ASCII characters
-- **Response Validation**: Filters out irrelevant or too-short responses
+**Transform how you read research papers with AI-powered analysis**
 
-## Project Structure
+[Live Demo](#demo) • [Features](#features) • [Installation](#installation) • [Usage](#usage)
+
+</div>
+
+---
+
+## 🎯 Problem Statement
+
+Reading research papers is challenging due to:
+- 📖 **Technical Jargon**: Unfamiliar domain-specific terms and acronyms
+- 📐 **Complex Equations**: Mathematical formulas without clear explanations
+- 📊 **Dense Figures**: Charts and tables that need interpretation
+- 📄 **Information Overload**: Long documents with scattered insights
+
+**PaperMind solves these pain points** by providing an intelligent AI assistant that helps you understand any research paper quickly and thoroughly.
+
+---
+
+## ✨ Features
+
+### 🔍 Smart Document Analysis
+- **Automatic Section Detection**: Identifies Abstract, Introduction, Methods, Results, etc.
+- **Technical Term Glossary**: Auto-detects jargon with AI-powered definitions
+- **Figure & Table Extraction**: Lists all visual elements with explanations
+- **Citation Analysis**: Tracks most referenced works
+
+### 📐 Equation Explainer
+- **Step-by-Step Breakdown**: Explains mathematical formulas in plain English
+- **Variable Definitions**: Defines each symbol and its meaning
+- **Context-Aware**: Uses paper context for accurate explanations
+
+### 💬 Intelligent Q&A
+- **Natural Language Queries**: Ask questions in plain English
+- **Three Explanation Levels**: Brief, Detailed, or Expert responses
+- **Source Citations**: Every answer includes relevant passages
+- **Persistent Chat**: Conversation history maintained throughout session
+
+### ⚡ Quick Actions
+- **Summarize**: Get paper overview in seconds
+- **Key Takeaways**: Extract main findings
+- **Prerequisites**: Identify required background knowledge
+- **Explain Equations**: Break down all mathematical content
+
+### 🎨 Professional Dark Theme UI
+- Modern, eye-friendly dark interface
+- Three-panel layout for efficient navigation
+- Reading progress tracking
+- Export chat history as JSON
+
+---
+
+## 🖼️ Screenshots
+
+<div align="center">
+
+| Welcome Screen | Document Analysis |
+|:---:|:---:|
+| Upload papers and get started | View sections, terms, and figures |
+
+| AI Chat | Equation Explainer |
+|:---:|:---:|
+| Ask questions, get cited answers | Step-by-step math breakdowns |
+
+</div>
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.9+
+- OpenAI API Key
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/rajeshwar-vempaty/PDF_Info_Retrieval.git
+cd PDF_Info_Retrieval
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up environment
+cp .env.example .env
+# Edit .env and add your OPENAI_API_KEY
+```
+
+### Run the App
+
+```bash
+# Standard version
+streamlit run app.py
+
+# Enhanced version with dark theme
+streamlit run app_enhanced.py
+```
+
+Visit `http://localhost:8501` in your browser.
+
+---
+
+## 📁 Project Structure
 
 ```
 PDF_Info_Retrieval/
-├── app.py                      # Main Streamlit application
+├── app.py                      # Standard Streamlit application
+├── app_enhanced.py             # Enhanced version with dark theme
 ├── requirements.txt            # Python dependencies
-├── README.md                   # Project documentation
-├── .env.example               # Example environment configuration
-├── .gitignore                 # Git ignore rules
+├── README.md                   # This file
+├── .env.example               # Environment template
 │
-├── src/                       # Source code modules
-│   ├── __init__.py           # Package initialization
-│   ├── config.py             # Configuration and settings
-│   ├── pdf_processor.py      # PDF text extraction
-│   ├── text_processor.py     # Text cleaning and chunking
-│   ├── vector_store.py       # Vector store management
-│   ├── conversation.py       # Conversation chain handling
+├── src/                       # Source modules
+│   ├── __init__.py
+│   ├── config.py              # Configuration settings
+│   ├── pdf_processor.py       # PDF text extraction
+│   ├── text_processor.py      # Text cleaning & chunking
+│   ├── vector_store.py        # FAISS vector store
+│   ├── conversation.py        # LangChain conversation
+│   ├── document_analyzer.py   # Basic document analysis
+│   ├── paper_analyzer.py      # Advanced paper analysis
 │   │
-│   └── ui/                   # UI components
+│   └── ui/                    # UI components
 │       ├── __init__.py
-│       └── templates.py      # HTML/CSS templates
+│       ├── templates.py       # Chat templates
+│       └── dark_theme.py      # Dark theme styling
 │
-└── tests/                    # Test suite
-    ├── __init__.py
-    ├── test_config.py
-    ├── test_pdf_processor.py
-    ├── test_text_processor.py
-    ├── test_vector_store.py
-    ├── test_conversation.py
-    └── test_ui_templates.py
+├── tests/                     # Test suite
+│   └── ...
+│
+└── .streamlit/
+    └── config.toml            # Streamlit configuration
 ```
 
-## Installation
+---
 
-### Prerequisites
-
-- Python 3.9 or higher
-- pip (Python package manager)
-
-### Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/PDF_Info_Retrieval.git
-   cd PDF_Info_Retrieval
-   ```
-
-2. **Create a virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment variables**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` and add your API keys:
-   ```
-   OPENAI_API_KEY=your-openai-api-key
-   HUGGINGFACEHUB_API_TOKEN=your-huggingface-token  # Optional
-   ```
-
-## Usage
-
-### Running the Application
-
-```bash
-streamlit run app.py
-```
-
-The application will open in your default web browser at `http://localhost:8501`.
-
-### Using the Application
-
-1. **Upload PDFs**: Use the sidebar to upload one or more PDF documents
-2. **Process Documents**: Click the "Process" button to extract and index the content
-3. **Ask Questions**: Type your questions in the main input field
-4. **View Responses**: The AI will provide answers based on the document content
-
-### Example Questions
-
-- "What are the main findings of this research?"
-- "Summarize the methodology used in the study"
-- "What conclusions did the authors draw?"
-- "Explain the results section"
-
-## Configuration
-
-The application can be configured through the `src/config.py` module:
+## 🔧 Configuration
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `chunk_size` | 1500 | Maximum characters per text chunk |
-| `min_response_length` | 30 | Minimum response length for relevance |
-| `embedding_model_type` | "openai" | Embedding model ("openai" or "huggingface") |
-| `llm_model_name` | "gpt-3.5-turbo" | LLM model for conversation |
-| `llm_temperature` | 0.7 | LLM temperature setting |
+| `chunk_size` | 1500 | Text chunk size for processing |
+| `llm_model_name` | gpt-3.5-turbo | OpenAI model to use |
+| `llm_temperature` | 0.7 | Response creativity (0-1) |
+| `embedding_model_type` | openai | Embedding model type |
 
-## Architecture
+---
 
-### RAG Pipeline
+## 🏗️ Architecture
 
 ```
-PDF Upload → Extract Text → Clean & Chunk → Create Embeddings → FAISS Vector Store
-                                                                        ↓
-User Question → Retrieve Similar Chunks → Generate Response with Context
+┌─────────────────────────────────────────────────────────────────┐
+│                         PaperMind                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
+│  │   PDF    │───▶│  Text    │───▶│  Vector  │───▶│  FAISS   │  │
+│  │ Processor│    │ Processor│    │  Store   │    │  Index   │  │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘  │
+│                                                        │         │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐         │         │
+│  │  Paper   │    │ Document │    │   Dark   │         │         │
+│  │ Analyzer │    │ Analyzer │    │  Theme   │         │         │
+│  └──────────┘    └──────────┘    └──────────┘         │         │
+│       │               │               │               │         │
+│       └───────────────┴───────────────┴───────────────┘         │
+│                               │                                  │
+│                               ▼                                  │
+│                    ┌──────────────────┐                         │
+│                    │   Conversation   │                         │
+│                    │     Manager      │                         │
+│                    │   (LangChain)    │                         │
+│                    └──────────────────┘                         │
+│                               │                                  │
+│                               ▼                                  │
+│                    ┌──────────────────┐                         │
+│                    │   OpenAI GPT    │                          │
+│                    └──────────────────┘                         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Components
+---
 
-1. **PDFProcessor**: Extracts raw text from PDF files using pdfplumber
-2. **TextProcessor**: Cleans text and splits it into chunks
-3. **VectorStoreManager**: Creates and manages FAISS vector store
-4. **ConversationManager**: Handles the conversational retrieval chain
-
-## Testing
-
-Run the test suite:
+## 🧪 Testing
 
 ```bash
 # Run all tests
 pytest
 
-# Run with coverage report
+# With coverage report
 pytest --cov=src --cov-report=html
 
-# Run specific test file
-pytest tests/test_text_processor.py
-
-# Run with verbose output
-pytest -v
+# Specific test file
+pytest tests/test_paper_analyzer.py -v
 ```
 
-## API Reference
+---
 
-### PDFProcessor
+## 🌐 Deployment
 
-```python
-from src.pdf_processor import PDFProcessor
+### Streamlit Cloud
 
-processor = PDFProcessor()
-text = processor.extract_text_from_files(pdf_files)
-summary = processor.get_processing_summary()
+1. Push code to GitHub
+2. Visit [share.streamlit.io](https://share.streamlit.io)
+3. Connect your repository
+4. Add secrets in Streamlit Cloud dashboard:
+   ```toml
+   OPENAI_API_KEY = "your-api-key"
+   ```
+5. Deploy!
+
+### Docker
+
+```bash
+docker build -t papermind .
+docker run -p 8501:8501 -e OPENAI_API_KEY=your-key papermind
 ```
 
-### TextProcessor
+---
 
-```python
-from src.text_processor import TextProcessor
+## 🤝 Contributing
 
-processor = TextProcessor()
-cleaned = processor.clean_text(raw_text)
-chunks = processor.create_chunks(cleaned)
-stats = processor.get_stats(raw_text)
-```
-
-### VectorStoreManager
-
-```python
-from src.vector_store import VectorStoreManager
-
-manager = VectorStoreManager()
-vectorstore = manager.create_vectorstore(text_chunks)
-results = manager.similarity_search("query", k=4)
-```
-
-### ConversationManager
-
-```python
-from src.conversation import ConversationManager
-
-manager = ConversationManager()
-chain = manager.create_chain(vectorstore)
-response = manager.ask("What is the main topic?")
-```
-
-## Dependencies
-
-### Core
-- **Streamlit**: Web application framework
-- **LangChain**: LLM application framework
-- **OpenAI**: GPT language models and embeddings
-
-### PDF Processing
-- **pdfplumber**: PDF text extraction
-
-### Vector Search
-- **FAISS**: Efficient similarity search
-
-### Embeddings
-- **Sentence Transformers**: Alternative embedding models
-- **HuggingFace Hub**: Model repository access
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"OPENAI_API_KEY not found"**
-   - Ensure `.env` file exists with valid API key
-   - Check that `python-dotenv` is installed
-
-2. **"Failed to process PDF"**
-   - Verify PDF is not corrupted or password-protected
-   - Check that PDF contains extractable text (not scanned images)
-
-3. **"Vector store creation failed"**
-   - Verify API keys are valid
-   - Check internet connection for OpenAI API access
-
-4. **"No relevant information found"**
-   - Try rephrasing your question
-   - Ensure the document was processed successfully
-
-## Contributing
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## License
+---
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## 📄 License
 
-## Acknowledgments
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-- [LangChain](https://langchain.com/) for the LLM framework
-- [Streamlit](https://streamlit.io/) for the web UI framework
-- [OpenAI](https://openai.com/) for the language models
-- [FAISS](https://github.com/facebookresearch/faiss) for vector similarity search
+---
+
+## 🙏 Acknowledgments
+
+- [LangChain](https://langchain.com/) - LLM application framework
+- [Streamlit](https://streamlit.io/) - Web application framework
+- [OpenAI](https://openai.com/) - Language models
+- [FAISS](https://github.com/facebookresearch/faiss) - Vector similarity search
+
+---
+
+<div align="center">
+
+**Built with ❤️ by [Rajeshwar Vempaty](https://github.com/rajeshwar-vempaty)**
+
+⭐ Star this repo if you find it helpful!
+
+</div>
