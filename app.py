@@ -8,7 +8,9 @@ Usage:
     streamlit run app.py
 """
 
+import json
 import logging
+from datetime import datetime
 import streamlit as st
 
 from src.config import Config
@@ -48,6 +50,12 @@ def initialize_session_state():
 
     if "documents_processed" not in st.session_state:
         st.session_state.documents_processed = False
+
+    if "source_documents" not in st.session_state:
+        st.session_state.source_documents = []
+
+    if "full_chat_history" not in st.session_state:
+        st.session_state.full_chat_history = []
 
 
 def process_documents(pdf_docs):
@@ -143,6 +151,18 @@ def handle_user_input(user_question: str):
 
         # Update chat history in session state
         st.session_state.chat_history = response.get('chat_history', [])
+        st.session_state.source_documents = response.get('source_documents', [])
+
+        # Store in full chat history for export
+        st.session_state.full_chat_history.append({
+            'timestamp': datetime.now().isoformat(),
+            'question': user_question,
+            'answer': response.get('answer', ''),
+            'sources': [
+                doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                for doc in st.session_state.source_documents
+            ]
+        })
 
         # Display chat history
         if st.session_state.chat_history:
@@ -159,6 +179,10 @@ def handle_user_input(user_question: str):
                             ChatTemplates.render_bot_message(content),
                             unsafe_allow_html=True
                         )
+
+                # Display source citations
+                if st.session_state.source_documents:
+                    display_source_citations(st.session_state.source_documents)
             else:
                 st.write(
                     ChatTemplates.render_warning_message(
@@ -171,6 +195,40 @@ def handle_user_input(user_question: str):
     except ConversationError as e:
         st.error(f"Error processing your question: {str(e)}")
         logger.error(f"Conversation error: {e}")
+
+
+def display_source_citations(source_documents):
+    """
+    Display source citations from retrieved documents.
+
+    Args:
+        source_documents: List of source document objects.
+    """
+    with st.expander("View Source Citations", expanded=False):
+        st.markdown("**Relevant passages from your documents:**")
+        for i, doc in enumerate(source_documents, 1):
+            content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
+            # Truncate long content
+            if len(content) > 500:
+                content = content[:500] + "..."
+            st.markdown(f"**Source {i}:**")
+            st.markdown(f"> {content}")
+            st.divider()
+
+
+def export_chat_history():
+    """
+    Export chat history as JSON.
+
+    Returns:
+        str: JSON string of chat history.
+    """
+    export_data = {
+        'exported_at': datetime.now().isoformat(),
+        'application': 'ResearchAI - PDF Info Retrieval',
+        'conversations': st.session_state.full_chat_history
+    }
+    return json.dumps(export_data, indent=2)
 
 
 def render_sidebar():
@@ -203,14 +261,34 @@ def render_sidebar():
         if st.button("Clear Conversation"):
             st.session_state.conversation_manager.clear_history()
             st.session_state.chat_history = []
+            st.session_state.full_chat_history = []
+            st.session_state.source_documents = []
             st.rerun()
 
         # Reset all button
         if st.button("Reset All"):
             st.session_state.conversation_manager.reset()
             st.session_state.chat_history = []
+            st.session_state.full_chat_history = []
+            st.session_state.source_documents = []
             st.session_state.documents_processed = False
             st.rerun()
+
+        st.divider()
+
+        # Export section
+        st.subheader("Export")
+
+        if st.session_state.full_chat_history:
+            export_data = export_chat_history()
+            st.download_button(
+                label="Download Chat History",
+                data=export_data,
+                file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json"
+            )
+        else:
+            st.caption("No conversation to export yet.")
 
 
 def main():

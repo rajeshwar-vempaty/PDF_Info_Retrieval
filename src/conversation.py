@@ -90,11 +90,12 @@ class ConversationManager:
                 return_messages=True
             )
 
-            # Create the chain
+            # Create the chain with source document retrieval
             self._chain = ConversationalRetrievalChain.from_llm(
                 llm=llm,
                 retriever=vectorstore.as_retriever(),
-                memory=self._memory
+                memory=self._memory,
+                return_source_documents=True
             )
 
             logger.info("Conversation chain created successfully")
