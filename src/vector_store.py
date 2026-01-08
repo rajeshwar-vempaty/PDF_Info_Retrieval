@@ -8,8 +8,9 @@ using FAISS for efficient similarity search operations.
 import logging
 from typing import List, Optional, Literal
 
-from langchain.embeddings import OpenAIEmbeddings, HuggingFaceInstructEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import HuggingFaceInstructEmbeddings
+from langchain_community.vectorstores import FAISS
 
 from src.config import Config, default_config
 
