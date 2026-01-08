@@ -84,10 +84,11 @@ class ConversationManager:
                 temperature=self.config.llm_temperature
             )
 
-            # Initialize conversation memory
+            # Initialize conversation memory with output_key for multi-output chains
             self._memory = ConversationBufferMemory(
                 memory_key='chat_history',
-                return_messages=True
+                return_messages=True,
+                output_key='answer'
             )
 
             # Create the chain with source document retrieval
@@ -95,7 +96,8 @@ class ConversationManager:
                 llm=llm,
                 retriever=vectorstore.as_retriever(),
                 memory=self._memory,
-                return_source_documents=True
+                return_source_documents=True,
+                output_key='answer'
             )
 
             logger.info("Conversation chain created successfully")
