@@ -22,6 +22,42 @@ from src.config import Config, default_config
 logger = logging.getLogger(__name__)
 
 
+def clean_pdf_text(text: str) -> str:
+    """
+    Clean garbled text commonly found in PDF extractions.
+    Fixes issues like ligatures, reversed characters, and encoding problems.
+    """
+    if not text:
+        return ""
+
+    # Remove common garbled patterns (reversed text markers, control chars)
+    # Pattern like >FOO< or similar reversed bracket patterns
+    text = re.sub(r'>[A-Za-z]+<', '', text)
+
+    # Remove control characters and non-printable characters
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+
+    # Fix common ligature issues
+    ligatures = {
+        'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬀ': 'ff', 'ﬃ': 'ffi', 'ﬄ': 'ffl',
+        'ﬅ': 'st', 'ﬆ': 'st', '—': '-', '–': '-', '"': '"', '"': '"',
+        ''': "'", ''': "'", '…': '...', '•': '-',
+    }
+    for lig, replacement in ligatures.items():
+        text = text.replace(lig, replacement)
+
+    # Remove excessive whitespace but preserve sentence structure
+    text = re.sub(r'\s+', ' ', text)
+
+    # Remove isolated special characters
+    text = re.sub(r'\s[<>]\s', ' ', text)
+
+    # Clean up any remaining angle brackets not part of valid content
+    text = re.sub(r'<[^>]{0,3}>', '', text)
+
+    return text.strip()
+
+
 # Common academic section patterns
 SECTION_PATTERNS = [
     (r'abstract', 'Abstract'),
@@ -205,7 +241,9 @@ class PaperAnalyzer:
         Returns:
             List of Term objects.
         """
-        text_lower = text.lower()
+        # Clean the text first to remove garbled characters
+        cleaned_text = clean_pdf_text(text)
+        text_lower = cleaned_text.lower()
         terms = []
 
         # Count occurrences of known technical terms
@@ -216,29 +254,46 @@ class PaperAnalyzer:
                 term_counts[term] = count
 
         # Also look for capitalized acronyms and technical-looking terms
-        acronyms = re.findall(r'\b([A-Z]{2,6})\b', text)
+        acronyms = re.findall(r'\b([A-Z]{2,6})\b', cleaned_text)
         acronym_counts = Counter(acronyms)
 
         # Combine and sort by frequency
         all_terms = list(term_counts.items())
         for acronym, count in acronym_counts.most_common(10):
-            if acronym not in ['THE', 'AND', 'FOR', 'WITH', 'FROM']:
+            if acronym not in ['THE', 'AND', 'FOR', 'WITH', 'FROM', 'THIS', 'THAT', 'EACH']:
                 all_terms.append((acronym, count))
 
         all_terms.sort(key=lambda x: x[1], reverse=True)
 
         # Create Term objects
         for term, count in all_terms[:top_n]:
-            # Find a context sentence
-            pattern = rf'[^.]*\b{re.escape(term)}\b[^.]*\.'
-            context_match = re.search(pattern, text, re.IGNORECASE)
-            context = context_match.group(0).strip() if context_match else ""
+            # Find a context sentence - use a more robust pattern
+            # Look for sentences containing the term
+            sentences = re.split(r'(?<=[.!?])\s+', cleaned_text)
+            context = ""
+            for sentence in sentences:
+                if re.search(rf'\b{re.escape(term)}\b', sentence, re.IGNORECASE):
+                    # Clean and validate the sentence
+                    clean_sentence = clean_pdf_text(sentence)
+                    # Only use if it looks like a valid sentence
+                    if len(clean_sentence) > 20 and clean_sentence[0].isupper():
+                        context = clean_sentence
+                        break
+
+            # Truncate and ensure clean output
+            if context:
+                context = context[:200]
+                # Make sure context doesn't end mid-word
+                if len(context) == 200:
+                    last_space = context.rfind(' ')
+                    if last_space > 150:
+                        context = context[:last_space] + "..."
 
             terms.append(Term(
                 term=term.title() if term.islower() else term,
                 definition="",  # Will be filled by AI if needed
                 frequency=count,
-                context=context[:200] if context else ""
+                context=context if context else "Term found in document"
             ))
 
         return terms
