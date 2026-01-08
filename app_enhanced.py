@@ -1,198 +1,212 @@
 """
 PaperMind: AI-Powered Research Paper Analysis
-
-A clean, professional Streamlit application for understanding research papers.
+Clean, professional UI for understanding research papers.
 """
 
 import json
 import logging
 from datetime import datetime
-from typing import List, Dict, Optional
 import streamlit as st
 
 from src.config import Config
-from src.pdf_processor import PDFProcessor, PDFProcessingError
+from src.pdf_processor import PDFProcessor
 from src.text_processor import TextProcessor
-from src.vector_store import VectorStoreManager, VectorStoreError
+from src.vector_store import VectorStoreManager
 from src.conversation import ConversationManager, ConversationError
 from src.document_analyzer import DocumentAnalyzer
-from src.paper_analyzer import PaperAnalyzer, Section, Term, Figure
+from src.paper_analyzer import PaperAnalyzer
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# ==================== CUSTOM CSS ====================
-CUSTOM_CSS = """
+# ==================== CSS ====================
+CSS = """
 <style>
-/* Dark theme base */
-.stApp {
-    background-color: #0f172a;
+.stApp { background-color: #0f172a; }
+footer { visibility: hidden; }
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #1e293b !important;
+    border-right: 1px solid #334155;
 }
+section[data-testid="stSidebar"] > div { background: #1e293b !important; }
 
-/* Hide only footer */
-footer {visibility: hidden;}
-
-/* Scrollbar */
-::-webkit-scrollbar {width: 6px; height: 6px;}
-::-webkit-scrollbar-track {background: #1e293b;}
-::-webkit-scrollbar-thumb {background: #475569; border-radius: 3px;}
-
-/* Section headers */
-.section-header {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #94a3b8;
-    margin-bottom: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* Compact cards */
-.info-card {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 0.75rem;
-    margin-bottom: 0.5rem;
-}
-
-/* Term badge */
-.term-badge {
-    display: inline-block;
-    background: rgba(139, 92, 246, 0.15);
-    color: #a78bfa;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    margin: 0.125rem;
-}
-
-/* Chat message */
-.chat-msg {
-    padding: 0.75rem;
-    border-radius: 8px;
-    margin-bottom: 0.5rem;
-    font-size: 0.9rem;
-    line-height: 1.5;
-}
-
-.chat-msg.user {
-    background: rgba(139, 92, 246, 0.2);
-    color: #e0e7ff;
-    margin-left: 15%;
-}
-
-.chat-msg.assistant {
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #f1f5f9;
-}
-
-/* Source citation */
-.source-box {
-    background: rgba(15, 23, 42, 0.5);
-    border-left: 2px solid #8b5cf6;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    font-size: 0.8rem;
-    color: #94a3b8;
-    border-radius: 0 4px 4px 0;
-}
-
-/* Stats display */
-.stat-row {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-    margin-bottom: 1rem;
-}
-
-.stat-item {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 6px;
-    padding: 0.5rem 0.75rem;
-    text-align: center;
-    min-width: 80px;
-}
-
-.stat-value {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #8b5cf6;
-}
-
-.stat-label {
-    font-size: 0.7rem;
-    color: #64748b;
-}
-
-/* Keywords */
-.keyword-tag {
-    display: inline-block;
-    background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
-    color: white;
-    padding: 0.25rem 0.6rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    margin: 0.15rem;
-}
-
-/* Welcome screen */
-.welcome-box {
-    text-align: center;
-    padding: 2rem;
-}
-
-.welcome-title {
-    font-size: 2rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 0.5rem;
-}
-
-.welcome-subtitle {
-    color: #64748b;
-    font-size: 1rem;
-    margin-bottom: 1.5rem;
-}
-
-/* Feature grid */
-.feature-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.75rem;
-    max-width: 500px;
-    margin: 0 auto;
-}
-
-.feature-item {
+/* Cards */
+.card {
     background: #1e293b;
     border: 1px solid #334155;
     border-radius: 8px;
     padding: 1rem;
-    text-align: center;
+    margin-bottom: 0.75rem;
 }
 
-.feature-icon {
-    font-size: 1.5rem;
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 0.5rem;
 }
 
-.feature-title {
-    font-size: 0.85rem;
+.card-title {
     font-weight: 600;
     color: #f1f5f9;
-    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
 }
 
-.feature-desc {
+.card-badge {
+    background: #8b5cf6;
+    color: white;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+}
+
+.card-content {
+    color: #94a3b8;
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+/* Equation display */
+.equation-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid #8b5cf6;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.equation-formula {
+    font-family: 'Courier New', monospace;
+    font-size: 1rem;
+    color: #e0e7ff;
+    background: #0f172a;
+    padding: 0.75rem;
+    border-radius: 4px;
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+
+.equation-label {
+    color: #a78bfa;
     font-size: 0.75rem;
+    text-align: right;
+}
+
+/* Figure display */
+.figure-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.figure-icon {
+    width: 40px;
+    height: 40px;
+    background: #334155;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.figure-info { flex: 1; }
+.figure-title { color: #f1f5f9; font-size: 0.85rem; font-weight: 500; }
+.figure-meta { color: #64748b; font-size: 0.7rem; margin-top: 0.25rem; }
+
+/* Stats row */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.stat-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 0.75rem;
+    text-align: center;
+}
+
+.stat-value { color: #8b5cf6; font-size: 1.25rem; font-weight: 600; }
+.stat-label { color: #64748b; font-size: 0.7rem; margin-top: 0.25rem; }
+
+/* Keywords */
+.keyword {
+    display: inline-block;
+    background: linear-gradient(135deg, #8b5cf6, #a855f7);
+    color: white;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    margin: 0.1rem;
+}
+
+/* Chat */
+.user-msg {
+    background: rgba(139, 92, 246, 0.2);
+    color: #e0e7ff;
+    padding: 0.75rem;
+    border-radius: 8px;
+    margin: 0.5rem 0 0.5rem 20%;
+    font-size: 0.85rem;
+}
+
+.ai-msg {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f1f5f9;
+    padding: 0.75rem;
+    border-radius: 8px;
+    margin: 0.5rem 20% 0.5rem 0;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.source-ref {
+    background: rgba(15, 23, 42, 0.5);
+    border-left: 2px solid #8b5cf6;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: #94a3b8;
+}
+
+/* Section header */
+.section-title {
+    color: #94a3b8;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 1rem 0 0.5rem 0;
+}
+
+/* Welcome */
+.welcome-title {
+    font-size: 2rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #8b5cf6, #a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+    margin-bottom: 0.5rem;
+}
+
+.welcome-sub {
     color: #64748b;
+    text-align: center;
+    margin-bottom: 1.5rem;
 }
 
 /* Streamlit overrides */
@@ -201,10 +215,8 @@ footer {visibility: hidden;}
     color: #f1f5f9 !important;
     border: 1px solid #475569 !important;
     border-radius: 6px !important;
-    padding: 0.35rem 0.75rem !important;
     font-size: 0.8rem !important;
-    font-weight: 500 !important;
-    transition: all 0.2s !important;
+    padding: 0.4rem 0.75rem !important;
 }
 
 .stButton > button:hover {
@@ -213,7 +225,7 @@ footer {visibility: hidden;}
 }
 
 .stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%) !important;
+    background: linear-gradient(135deg, #8b5cf6, #a855f7) !important;
     border: none !important;
 }
 
@@ -224,380 +236,299 @@ div[data-testid="stMetric"] {
     padding: 0.5rem;
 }
 
-div[data-testid="stMetricValue"] {
-    font-size: 1.25rem !important;
-    color: #8b5cf6 !important;
-}
+div[data-testid="stMetricValue"] { color: #8b5cf6 !important; font-size: 1.1rem !important; }
+div[data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.7rem !important; }
 
-div[data-testid="stMetricLabel"] {
-    font-size: 0.7rem !important;
-    color: #64748b !important;
-}
+.stTabs [data-baseweb="tab-list"] { gap: 0; background: #1e293b; border-radius: 6px; padding: 0.25rem; }
+.stTabs [data-baseweb="tab"] { background: transparent; border-radius: 4px; font-size: 0.8rem; padding: 0.5rem 1rem; }
+.stTabs [aria-selected="true"] { background: #8b5cf6 !important; }
 
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0.5rem;
-    background: transparent;
-}
-
-.stTabs [data-baseweb="tab"] {
-    background: #1e293b;
-    border-radius: 6px;
-    padding: 0.5rem 1rem;
-    font-size: 0.8rem;
-}
-
-.stTabs [aria-selected="true"] {
-    background: #8b5cf6 !important;
-}
-
-.stExpander {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 6px;
-}
-
-.stTextInput input, .stSelectbox > div > div {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    color: #f1f5f9 !important;
-    font-size: 0.85rem !important;
-}
-
-section[data-testid="stSidebar"] {
-    background: #1e293b !important;
-    border-right: 1px solid #334155 !important;
-    min-width: 250px !important;
-}
-
-section[data-testid="stSidebar"] > div {
-    background: #1e293b !important;
-}
-
-section[data-testid="stSidebar"] .stMarkdown {
-    color: #f1f5f9 !important;
-}
-
-/* Ensure sidebar is visible */
-[data-testid="stSidebar"][aria-expanded="true"] {
-    display: block !important;
-    visibility: visible !important;
-}
-
-/* Radio buttons compact */
-.stRadio > div {
-    flex-direction: row !important;
-    gap: 0.5rem !important;
-}
-
-.stRadio label {
-    background: #334155 !important;
-    padding: 0.3rem 0.6rem !important;
-    border-radius: 4px !important;
-    font-size: 0.75rem !important;
-}
+.stExpander { background: #1e293b; border: 1px solid #334155; border-radius: 6px; }
+.stTextInput input { background: #1e293b !important; border: 1px solid #334155 !important; color: #f1f5f9 !important; }
 </style>
 """
 
 
-def init_session_state():
+def init_state():
     """Initialize session state."""
-    defaults = {
-        "config": Config(),
-        "messages": [],
-        "documents_processed": False,
-        "document_analysis": None,
-        "paper_analysis": None,
-        "raw_text": "",
-        "current_filename": None,
-        "explanation_level": "detailed",
-        "nav_tab": "outline",
-        "term_defs": {},
-    }
+    if "config" not in st.session_state:
+        st.session_state.config = Config()
+        st.session_state.pdf_processor = PDFProcessor()
+        st.session_state.text_processor = TextProcessor(st.session_state.config)
+        st.session_state.vectorstore_manager = VectorStoreManager(st.session_state.config)
+        st.session_state.conversation_manager = ConversationManager(st.session_state.config)
+        st.session_state.document_analyzer = DocumentAnalyzer(st.session_state.config)
+        st.session_state.paper_analyzer = PaperAnalyzer(st.session_state.config)
 
-    for key, val in defaults.items():
+    for key, val in [("messages", []), ("processed", False), ("analysis", None),
+                      ("paper", None), ("text", ""), ("filename", None), ("level", "detailed")]:
         if key not in st.session_state:
             st.session_state[key] = val
 
-    # Initialize processors
-    if "pdf_processor" not in st.session_state:
-        st.session_state.pdf_processor = PDFProcessor()
-    if "text_processor" not in st.session_state:
-        st.session_state.text_processor = TextProcessor(st.session_state.config)
-    if "vectorstore_manager" not in st.session_state:
-        st.session_state.vectorstore_manager = VectorStoreManager(st.session_state.config)
-    if "conversation_manager" not in st.session_state:
-        st.session_state.conversation_manager = ConversationManager(st.session_state.config)
-    if "document_analyzer" not in st.session_state:
-        st.session_state.document_analyzer = DocumentAnalyzer(st.session_state.config)
-    if "paper_analyzer" not in st.session_state:
-        st.session_state.paper_analyzer = PaperAnalyzer(st.session_state.config)
 
-
-def process_documents(pdf_docs):
+def process_pdf(files):
     """Process uploaded PDFs."""
     try:
-        st.session_state.current_filename = pdf_docs[0].name if pdf_docs else None
+        st.session_state.filename = files[0].name if files else None
 
         with st.spinner("Extracting text..."):
-            raw_text = st.session_state.pdf_processor.extract_text_from_files(pdf_docs)
-            if not raw_text.strip():
-                st.error("No text extracted from documents.")
+            text = st.session_state.pdf_processor.extract_text_from_files(files)
+            if not text.strip():
+                st.error("No text found in PDF.")
                 return False
-            st.session_state.raw_text = raw_text
+            st.session_state.text = text
 
-        with st.spinner("Analyzing structure..."):
-            st.session_state.paper_analysis = st.session_state.paper_analyzer.analyze_paper(raw_text)
+        with st.spinner("Analyzing paper..."):
+            st.session_state.paper = st.session_state.paper_analyzer.analyze_paper(text)
+            st.session_state.analysis = st.session_state.document_analyzer.analyze_document(text)
 
-        with st.spinner("Generating insights..."):
-            st.session_state.document_analysis = st.session_state.document_analyzer.analyze_document(raw_text)
-
-        with st.spinner("Creating embeddings..."):
-            chunks = st.session_state.text_processor.process(raw_text)
-            if not chunks:
-                st.error("Failed to process text.")
-                return False
+        with st.spinner("Building index..."):
+            chunks = st.session_state.text_processor.process(text)
             vectorstore = st.session_state.vectorstore_manager.create_vectorstore(chunks)
-
-        with st.spinner("Setting up AI..."):
             st.session_state.conversation_manager.create_chain(vectorstore)
 
-        st.session_state.documents_processed = True
+        st.session_state.processed = True
         st.session_state.messages = []
         return True
-
     except Exception as e:
-        st.error(f"Error: {str(e)}")
-        logger.exception("Processing error")
+        st.error(f"Error: {e}")
         return False
 
 
-def ask_question(question: str):
-    """Process a question."""
-    if not st.session_state.documents_processed:
+def ask(question):
+    """Ask a question."""
+    if not st.session_state.processed:
         return
 
-    level = st.session_state.explanation_level
-    prompts = {
-        'brief': 'Answer briefly in 1-2 sentences.',
-        'detailed': 'Provide a detailed explanation.',
-        'expert': 'Provide a comprehensive technical explanation.'
-    }
+    prompts = {'brief': 'Be brief.', 'detailed': 'Explain in detail.', 'expert': 'Give technical depth.'}
+    enhanced = f"{question}\n\n{prompts.get(st.session_state.level, '')}"
 
-    enhanced = f"{question}\n\n{prompts.get(level, '')}"
     st.session_state.messages.append({"role": "user", "content": question})
 
     try:
         response = st.session_state.conversation_manager.ask(enhanced)
-        answer = response.get('answer', 'No answer found.')
-        sources = []
-
-        if response.get('source_documents'):
-            sources = [doc.page_content[:150] + "..." for doc in response['source_documents'][:2]]
-
+        sources = [d.page_content[:150] + "..." for d in response.get('source_documents', [])[:2]]
         st.session_state.messages.append({
             "role": "assistant",
-            "content": answer,
+            "content": response.get('answer', 'No answer.'),
             "sources": sources
         })
     except Exception as e:
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": f"Error: {str(e)}"
-        })
+        st.session_state.messages.append({"role": "assistant", "content": f"Error: {e}"})
 
 
 def render_sidebar():
     """Render sidebar."""
     with st.sidebar:
         st.markdown("""
-        <div style="text-align: center; padding: 0.75rem 0;">
-            <span style="font-size: 1.75rem;">📚</span>
-            <h2 style="margin: 0.25rem 0; font-size: 1.25rem;
-                background: linear-gradient(135deg, #8b5cf6, #a855f7);
-                -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                PaperMind
-            </h2>
-            <p style="color: #64748b; font-size: 0.75rem; margin: 0;">AI Research Assistant</p>
+        <div style="text-align:center; padding: 1rem 0;">
+            <span style="font-size: 2rem;">📚</span>
+            <h2 style="margin: 0.25rem 0; background: linear-gradient(135deg, #8b5cf6, #a855f7);
+                -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 1.5rem;">
+                PaperMind</h2>
+            <p style="color: #64748b; font-size: 0.8rem; margin: 0;">AI Research Assistant</p>
         </div>
         """, unsafe_allow_html=True)
 
         st.divider()
 
         # Upload
-        st.markdown('<p class="section-header">Upload Paper</p>', unsafe_allow_html=True)
-        pdf_docs = st.file_uploader(
-            "PDF", accept_multiple_files=True, type=['pdf'],
-            label_visibility="collapsed"
-        )
+        files = st.file_uploader("Upload PDF", type=['pdf'], accept_multiple_files=True, label_visibility="collapsed")
 
-        if st.button("Analyze", type="primary", use_container_width=True):
-            if pdf_docs:
-                if process_documents(pdf_docs):
-                    st.success("Ready!")
+        if st.button("🚀 Analyze Paper", type="primary", use_container_width=True):
+            if files:
+                if process_pdf(files):
                     st.rerun()
             else:
-                st.warning("Upload a PDF first.")
+                st.warning("Upload a PDF first")
 
-        if st.session_state.documents_processed:
-            st.caption(f"✓ {st.session_state.current_filename}")
+        if st.session_state.processed:
+            st.success(f"✓ {st.session_state.filename}")
+
+        st.divider()
+
+        # Response level
+        st.markdown("**Response Level**")
+        st.session_state.level = st.radio(
+            "level", ["brief", "detailed", "expert"],
+            index=1, horizontal=True, label_visibility="collapsed"
+        )
 
         st.divider()
 
         # Actions
-        col1, col2 = st.columns(2)
-        with col1:
+        c1, c2 = st.columns(2)
+        with c1:
             if st.button("Clear Chat", use_container_width=True):
                 st.session_state.messages = []
                 st.session_state.conversation_manager.clear_history()
                 st.rerun()
-        with col2:
-            if st.button("Reset", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
+        with c2:
+            if st.button("Reset All", use_container_width=True):
+                for k in list(st.session_state.keys()):
+                    del st.session_state[k]
                 st.rerun()
-
-        # Export
-        if st.session_state.messages:
-            st.divider()
-            export_data = json.dumps({
-                'app': 'PaperMind',
-                'date': datetime.now().isoformat(),
-                'chat': st.session_state.messages
-            }, indent=2)
-            st.download_button(
-                "Export Chat", export_data,
-                f"chat_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                use_container_width=True
-            )
 
 
 def render_welcome():
     """Render welcome screen."""
+    st.markdown('<div class="welcome-title">📚 PaperMind</div>', unsafe_allow_html=True)
+    st.markdown('<p class="welcome-sub">AI-Powered Research Paper Analysis</p>', unsafe_allow_html=True)
+
     st.markdown("""
-    <div class="welcome-box">
-        <div class="welcome-title">📚 PaperMind</div>
-        <div class="welcome-subtitle">AI-Powered Research Paper Analysis</div>
-        <p style="color: #94a3b8; max-width: 450px; margin: 0 auto 1.5rem; font-size: 0.9rem;">
-            Upload research papers and get instant explanations of complex concepts,
-            equations, and technical terminology.
-        </p>
-        <div class="feature-grid">
-            <div class="feature-item">
-                <div class="feature-icon">📖</div>
-                <div class="feature-title">Glossary</div>
-                <div class="feature-desc">Auto-detect technical terms</div>
-            </div>
-            <div class="feature-item">
-                <div class="feature-icon">📐</div>
-                <div class="feature-title">Equations</div>
-                <div class="feature-desc">Step-by-step explanations</div>
-            </div>
-            <div class="feature-item">
-                <div class="feature-icon">📊</div>
-                <div class="feature-title">Figures</div>
-                <div class="feature-desc">Visual element analysis</div>
-            </div>
-            <div class="feature-item">
-                <div class="feature-icon">💬</div>
-                <div class="feature-title">Q&A</div>
-                <div class="feature-desc">Ask anything about the paper</div>
-            </div>
-        </div>
-    </div>
+    <p style="text-align:center; color:#94a3b8; max-width:500px; margin:0 auto 2rem;">
+    Upload research papers and get instant explanations of complex concepts, equations, and terminology.
+    </p>
     """, unsafe_allow_html=True)
+
+    cols = st.columns(4)
+    features = [("📖", "Glossary", "Technical terms"), ("📐", "Equations", "Step-by-step"),
+                ("📊", "Figures", "Visual analysis"), ("💬", "Q&A", "Ask anything")]
+    for i, (icon, title, desc) in enumerate(features):
+        with cols[i]:
+            st.markdown(f"""
+            <div class="card" style="text-align:center;">
+                <div style="font-size:1.5rem;">{icon}</div>
+                <div class="card-title">{title}</div>
+                <div class="card-content">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
     st.info("👈 Upload a PDF from the sidebar to begin")
 
 
-def render_navigation():
-    """Render left navigation panel."""
-    paper = st.session_state.paper_analysis or {}
+def render_overview():
+    """Render overview tab with stats, summary, keywords."""
+    analysis = st.session_state.analysis
+    paper = st.session_state.paper
 
-    # Tab buttons
-    tabs = {"outline": "Outline", "terms": "Terms", "figures": "Figures"}
-    cols = st.columns(3)
-    for i, (key, label) in enumerate(tabs.items()):
-        with cols[i]:
-            btn_type = "primary" if st.session_state.nav_tab == key else "secondary"
-            if st.button(label, key=f"nav_{key}", type=btn_type, use_container_width=True):
-                st.session_state.nav_tab = key
+    if not analysis:
+        return
+
+    stats = analysis.get('stats', {})
+    figures = paper.get('figures', []) if paper else []
+
+    # Stats
+    st.markdown('<div class="section-title">📊 Statistics</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Words", stats.get('words', '-'))
+    c2.metric("Read Time", stats.get('reading_time', '-'))
+    c3.metric("Sentences", stats.get('sentences', '-'))
+    c4.metric("Figures", len([f for f in figures if f.type in ['figure', 'table']]))
+
+    # Summary
+    st.markdown('<div class="section-title">📋 Summary</div>', unsafe_allow_html=True)
+    if analysis.get('summary'):
+        st.info(analysis['summary'])
+
+    # Keywords
+    st.markdown('<div class="section-title">🏷️ Key Topics</div>', unsafe_allow_html=True)
+    keywords = analysis.get('keywords', [])[:12]
+    if keywords:
+        html = "".join([f'<span class="keyword">{k}</span>' for k in keywords])
+        st.markdown(html, unsafe_allow_html=True)
+
+
+def render_equations():
+    """Render equations tab."""
+    paper = st.session_state.paper
+    if not paper:
+        return
+
+    equations = [f for f in paper.get('figures', []) if f.type == 'equation']
+
+    st.markdown('<div class="section-title">📐 Equations Found</div>', unsafe_allow_html=True)
+
+    if not equations:
+        st.caption("No equations detected in this paper.")
+        return
+
+    for eq in equations[:10]:
+        st.markdown(f"""
+        <div class="equation-card">
+            <div class="equation-formula">{eq.content[:100]}</div>
+            <div class="equation-label">{eq.title} • Page {eq.page}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.button(f"Explain {eq.title}", key=f"eq_{eq.id}"):
+            ask(f"Explain this equation step by step: {eq.content}")
+            st.rerun()
+
+
+def render_figures():
+    """Render figures and tables tab."""
+    paper = st.session_state.paper
+    if not paper:
+        return
+
+    figures = [f for f in paper.get('figures', []) if f.type in ['figure', 'table']]
+
+    st.markdown('<div class="section-title">📊 Figures & Tables</div>', unsafe_allow_html=True)
+
+    if not figures:
+        st.caption("No figures or tables detected.")
+        return
+
+    for fig in figures[:10]:
+        icon = "📊" if fig.type == "figure" else "📋"
+        st.markdown(f"""
+        <div class="figure-card">
+            <div class="figure-icon">{icon}</div>
+            <div class="figure-info">
+                <div class="figure-title">{fig.title}</div>
+                <div class="figure-meta">{fig.type.title()} • Page {fig.page}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.caption(fig.caption[:100] + "..." if len(fig.caption) > 100 else fig.caption)
+        with col2:
+            if st.button("Explain", key=f"fig_{fig.id}"):
+                ask(f"Explain {fig.title}: {fig.caption}")
                 st.rerun()
 
-    st.markdown("---")
 
-    # Content based on tab
-    if st.session_state.nav_tab == "outline":
-        sections = paper.get('sections', [])
-        if sections:
-            for sec in sections[:8]:
-                col1, col2 = st.columns([5, 1])
-                with col1:
-                    if st.button(f"○ {sec.title}", key=f"sec_{sec.id}", use_container_width=True):
-                        ask_question(f"Summarize the {sec.title} section.")
-                        st.rerun()
-                with col2:
-                    st.caption(f"p.{sec.page}")
-        else:
-            st.caption("No sections detected")
+def render_terms():
+    """Render technical terms tab."""
+    paper = st.session_state.paper
+    if not paper:
+        return
 
-    elif st.session_state.nav_tab == "terms":
-        terms = paper.get('terms', [])
-        if terms:
-            for term in terms[:10]:
-                with st.expander(f"{term.term} ({term.frequency}x)"):
-                    if term.term in st.session_state.term_defs:
-                        st.write(st.session_state.term_defs[term.term])
-                    else:
-                        st.caption(term.context[:100] + "..." if term.context else "")
-                    if st.button("Explain", key=f"term_{term.term}"):
-                        with st.spinner("..."):
-                            defn = st.session_state.paper_analyzer.generate_term_definition(
-                                term.term, term.context
-                            )
-                            st.session_state.term_defs[term.term] = defn
-                            st.rerun()
-        else:
-            st.caption("No terms detected")
+    terms = paper.get('terms', [])[:15]
 
-    else:  # figures
-        figures = paper.get('figures', [])
-        if figures:
-            for fig in figures[:8]:
-                icon = {'figure': '📊', 'table': '📋', 'equation': '📐'}.get(fig.type, '📄')
-                with st.expander(f"{icon} {fig.title}"):
-                    st.caption(f"Page {fig.page} • {fig.type}")
-                    if st.button("Explain", key=f"fig_{fig.id}"):
-                        ask_question(f"Explain {fig.title}")
-                        st.rerun()
-        else:
-            st.caption("No figures detected")
+    st.markdown('<div class="section-title">📖 Technical Terms</div>', unsafe_allow_html=True)
+
+    if not terms:
+        st.caption("No technical terms detected.")
+        return
+
+    for term in terms:
+        with st.expander(f"**{term.term}** ({term.frequency}x)"):
+            if term.context:
+                st.caption(f"Context: {term.context[:150]}...")
+            if st.button("Get Definition", key=f"term_{term.term}"):
+                ask(f"Define '{term.term}' in the context of this paper.")
+                st.rerun()
 
 
 def render_chat():
-    """Render chat panel."""
-    # Explanation level
-    st.markdown('<p class="section-header">Response Detail</p>', unsafe_allow_html=True)
-    level = st.radio(
-        "Level", ["brief", "detailed", "expert"],
-        index=["brief", "detailed", "expert"].index(st.session_state.explanation_level),
-        horizontal=True, label_visibility="collapsed"
-    )
-    if level != st.session_state.explanation_level:
-        st.session_state.explanation_level = level
-
+    """Render chat interface."""
     # Quick actions
-    st.markdown('<p class="section-header">Quick Actions</p>', unsafe_allow_html=True)
-    cols = st.columns(4)
-    actions = [
-        ("✨ Summary", "Summarize this paper in detail."),
-        ("💡 Takeaways", "What are the key takeaways?"),
-        ("📐 Equations", "Explain the main equations."),
-        ("🧠 Prerequisites", "What knowledge is needed?"),
-    ]
-    for i, (label, question) in enumerate(actions):
-        with cols[i]:
+    st.markdown('<div class="section-title">⚡ Quick Actions</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+
+    actions = [("✨ Summary", "Summarize this paper."),
+               ("💡 Takeaways", "What are the key takeaways?"),
+               ("📐 Equations", "Explain the main equations."),
+               ("🧠 Prerequisites", "What background knowledge is needed?")]
+
+    for i, (label, q) in enumerate(actions):
+        with [c1, c2, c3, c4][i]:
             if st.button(label, use_container_width=True):
-                ask_question(question)
+                ask(q)
                 st.rerun()
 
     st.markdown("---")
@@ -605,107 +536,54 @@ def render_chat():
     # Messages
     for msg in st.session_state.messages:
         if msg["role"] == "user":
-            st.markdown(f'<div class="chat-msg user">{msg["content"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
         else:
-            content = msg["content"]
             sources_html = ""
             if msg.get("sources"):
-                sources_html = '<div class="source-box">'
-                for src in msg["sources"]:
-                    sources_html += f"<div>📍 {src}</div>"
-                sources_html += '</div>'
-            st.markdown(f'<div class="chat-msg assistant">{content}{sources_html}</div>', unsafe_allow_html=True)
+                sources_html = '<div class="source-ref">' + "<br>".join([f"📍 {s}" for s in msg["sources"]]) + '</div>'
+            st.markdown(f'<div class="ai-msg">{msg["content"]}{sources_html}</div>', unsafe_allow_html=True)
 
     # Suggested questions
     if not st.session_state.messages:
-        analysis = st.session_state.document_analysis
+        analysis = st.session_state.analysis
         if analysis and analysis.get('suggested_questions'):
-            st.markdown('<p class="section-header">Suggested Questions</p>', unsafe_allow_html=True)
+            st.markdown('<div class="section-title">💡 Suggested Questions</div>', unsafe_allow_html=True)
             for q in analysis['suggested_questions'][:3]:
                 if st.button(f"→ {q}", key=f"sq_{hash(q)}"):
-                    ask_question(q)
+                    ask(q)
                     st.rerun()
 
     # Input
     st.markdown("---")
     question = st.chat_input("Ask about the paper...")
     if question:
-        ask_question(question)
+        ask(question)
         st.rerun()
 
 
-def render_analysis():
-    """Render analysis panel."""
-    analysis = st.session_state.document_analysis
-    paper = st.session_state.paper_analysis
-
-    if not analysis:
-        return
-
-    # Stats
-    stats = analysis.get('stats', {})
-    st.markdown('<p class="section-header">Statistics</p>', unsafe_allow_html=True)
-
-    cols = st.columns(4)
-    items = [
-        ("📝", "Words", stats.get('words', '-')),
-        ("⏱️", "Read Time", stats.get('reading_time', '-')),
-        ("💬", "Sentences", stats.get('sentences', '-')),
-        ("📊", "Figures", len(paper.get('figures', [])) if paper else 0),
-    ]
-    for i, (icon, label, val) in enumerate(items):
-        with cols[i]:
-            st.metric(f"{icon} {label}", val)
-
-    # Summary
-    st.markdown('<p class="section-header">Summary</p>', unsafe_allow_html=True)
-    if analysis.get('summary'):
-        st.info(analysis['summary'])
-
-    # Keywords
-    st.markdown('<p class="section-header">Key Topics</p>', unsafe_allow_html=True)
-    keywords = analysis.get('keywords', [])
-    if keywords:
-        html = "".join([f'<span class="keyword-tag">{k}</span>' for k in keywords[:10]])
-        st.markdown(html, unsafe_allow_html=True)
-
-    # Citations
-    if paper and paper.get('citations'):
-        st.markdown('<p class="section-header">Top References</p>', unsafe_allow_html=True)
-        for cit in paper['citations'][:5]:
-            st.caption(f"• {cit.authors} ({cit.year}) - {cit.cited_count}x cited")
-
-
 def main():
-    """Main entry point."""
-    st.set_page_config(
-        page_title="PaperMind",
-        page_icon="📚",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    st.set_page_config(page_title="PaperMind", page_icon="📚", layout="wide", initial_sidebar_state="expanded")
+    st.markdown(CSS, unsafe_allow_html=True)
 
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-    init_session_state()
+    init_state()
     render_sidebar()
 
-    if not st.session_state.documents_processed:
+    if not st.session_state.processed:
         render_welcome()
     else:
-        # Main layout
-        col_nav, col_main = st.columns([1, 3])
+        # Main tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Chat", "📊 Overview", "📐 Equations", "📊 Figures", "📖 Terms"])
 
-        with col_nav:
-            render_navigation()
-
-        with col_main:
-            tab1, tab2 = st.tabs(["💬 Chat", "📊 Analysis"])
-
-            with tab1:
-                render_chat()
-
-            with tab2:
-                render_analysis()
+        with tab1:
+            render_chat()
+        with tab2:
+            render_overview()
+        with tab3:
+            render_equations()
+        with tab4:
+            render_figures()
+        with tab5:
+            render_terms()
 
 
 if __name__ == '__main__':
