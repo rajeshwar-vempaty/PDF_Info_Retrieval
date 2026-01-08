@@ -73,10 +73,24 @@ class Config:
         self._load_env_variables()
 
     def _load_env_variables(self):
-        """Load API keys and tokens from environment variables."""
+        """Load API keys and tokens from environment variables or Streamlit secrets."""
         load_dotenv()
+
+        # Try environment variables first
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.huggingface_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+
+        # Fall back to Streamlit secrets if available
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                if not self.openai_api_key and 'OPENAI_API_KEY' in st.secrets:
+                    self.openai_api_key = st.secrets['OPENAI_API_KEY']
+                    os.environ['OPENAI_API_KEY'] = self.openai_api_key
+                if not self.huggingface_api_token and 'HUGGINGFACEHUB_API_TOKEN' in st.secrets:
+                    self.huggingface_api_token = st.secrets['HUGGINGFACEHUB_API_TOKEN']
+        except Exception:
+            pass  # Streamlit not available or no secrets
 
     @property
     def header_pattern(self) -> str:

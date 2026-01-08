@@ -4,15 +4,17 @@
 
 ![PaperMind Banner](https://img.shields.io/badge/PaperMind-AI%20Research%20Assistant-8b5cf6?style=for-the-badge&logo=bookstack&logoColor=white)
 
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Streamlit_Cloud-ff4b4b?style=for-the-badge)](https://papermind.streamlit.app)
+
 [![Python](https://img.shields.io/badge/Python-3.9+-3776ab?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-ff4b4b?style=flat-square&logo=streamlit&logoColor=white)](https://streamlit.io)
 [![LangChain](https://img.shields.io/badge/LangChain-0.1.20-1c3c3c?style=flat-square)](https://langchain.com)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-412991?style=flat-square&logo=openai&logoColor=white)](https://openai.com)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT-412991?style=flat-square&logo=openai&logoColor=white)](https://openai.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 **Transform how you read research papers with AI-powered analysis**
 
-[Live Demo](#demo) • [Features](#features) • [Installation](#installation) • [Usage](#usage)
+[Features](#-features) • [Tech Stack](#-tech-stack) • [Installation](#-quick-start) • [Deploy](#-deployment)
 
 </div>
 
@@ -57,9 +59,21 @@ Reading research papers is challenging due to:
 
 ### 🎨 Professional Dark Theme UI
 - Modern, eye-friendly dark interface
-- Three-panel layout for efficient navigation
-- Reading progress tracking
-- Export chat history as JSON
+- Responsive tabbed layout
+- Clean, minimalist design
+- Mobile-friendly
+
+---
+
+## 🛠️ Tech Stack
+
+| Category | Technologies |
+|----------|-------------|
+| **Frontend** | Streamlit, Custom CSS |
+| **AI/ML** | LangChain, OpenAI GPT, FAISS |
+| **PDF Processing** | PyMuPDF, pdfplumber, Pillow |
+| **Embeddings** | OpenAI Embeddings, Sentence Transformers |
+| **Deployment** | Streamlit Cloud |
 
 ---
 

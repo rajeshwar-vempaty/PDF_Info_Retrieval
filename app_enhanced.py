@@ -1,8 +1,14 @@
 """
 PaperMind: AI-Powered Research Paper Analysis
 Clean, professional UI with image and equation rendering.
+
+Deploy to Streamlit Cloud:
+1. Push to GitHub
+2. Connect repo at share.streamlit.io
+3. Add OPENAI_API_KEY in Secrets
 """
 
+import os
 import io
 import json
 import logging
@@ -13,6 +19,111 @@ from pathlib import Path
 import streamlit as st
 
 from src.config import Config
+
+
+def check_api_key() -> bool:
+    """Check if OpenAI API key is configured."""
+    # Check environment variable
+    if os.getenv("OPENAI_API_KEY"):
+        return True
+
+    # Check Streamlit secrets
+    try:
+        if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+            os.environ['OPENAI_API_KEY'] = st.secrets['OPENAI_API_KEY']
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def render_api_key_error():
+    """Render a friendly error page when API key is missing."""
+    st.set_page_config(page_title="PaperMind - Setup Required", page_icon="🔑", layout="centered")
+
+    st.markdown("""
+    <style>
+    .stApp { background-color: #0f172a; }
+    .setup-container {
+        max-width: 600px;
+        margin: 3rem auto;
+        padding: 2rem;
+        background: #1e293b;
+        border-radius: 16px;
+        border: 1px solid #334155;
+        text-align: center;
+    }
+    .setup-icon { font-size: 4rem; margin-bottom: 1rem; }
+    .setup-title {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #f1f5f9;
+        margin-bottom: 0.5rem;
+    }
+    .setup-subtitle { color: #94a3b8; margin-bottom: 2rem; }
+    .step {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.75rem 0;
+        text-align: left;
+    }
+    .step-num {
+        display: inline-block;
+        width: 24px;
+        height: 24px;
+        background: #8b5cf6;
+        color: white;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 24px;
+        font-size: 0.8rem;
+        margin-right: 0.75rem;
+    }
+    .step-text { color: #e2e8f0; }
+    .code-block {
+        background: #0f172a;
+        border: 1px solid #475569;
+        border-radius: 6px;
+        padding: 0.75rem;
+        margin-top: 0.5rem;
+        font-family: monospace;
+        color: #a78bfa;
+        font-size: 0.85rem;
+    }
+    a { color: #8b5cf6 !important; }
+    </style>
+
+    <div class="setup-container">
+        <div class="setup-icon">🔑</div>
+        <div class="setup-title">OpenAI API Key Required</div>
+        <div class="setup-subtitle">PaperMind needs an OpenAI API key to analyze papers</div>
+
+        <div class="step">
+            <span class="step-num">1</span>
+            <span class="step-text">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a></span>
+        </div>
+
+        <div class="step">
+            <span class="step-num">2</span>
+            <span class="step-text">For <strong>Streamlit Cloud</strong>: Add to app Settings > Secrets</span>
+            <div class="code-block">OPENAI_API_KEY = "sk-your-key-here"</div>
+        </div>
+
+        <div class="step">
+            <span class="step-num">3</span>
+            <span class="step-text">For <strong>local development</strong>: Create a .env file</span>
+            <div class="code-block">OPENAI_API_KEY=sk-your-key-here</div>
+        </div>
+
+        <div style="margin-top: 2rem; color: #64748b; font-size: 0.85rem;">
+            After adding your key, refresh this page
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 from src.pdf_processor import PDFProcessor
 from src.text_processor import TextProcessor
 from src.vector_store import VectorStoreManager
@@ -826,6 +937,11 @@ def render_chat():
 
 
 def main():
+    # Check for API key first
+    if not check_api_key():
+        render_api_key_error()
+        return
+
     st.set_page_config(page_title="PaperMind", page_icon="📚", layout="wide", initial_sidebar_state="expanded")
     st.markdown(CSS, unsafe_allow_html=True)
 
