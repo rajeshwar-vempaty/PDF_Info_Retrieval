@@ -395,7 +395,7 @@ div[data-testid="stMetricLabel"] { color: #94a3b8 !important; font-size: 0.75rem
 
 
 def extract_images_from_pdf(pdf_file) -> list:
-    """Extract images from PDF using PyMuPDF with multiple extraction methods."""
+    """Extract page renders and embedded images from PDF using PyMuPDF."""
     images = []
 
     if not HAS_PYMUPDF or not HAS_PIL:
@@ -411,13 +411,36 @@ def extract_images_from_pdf(pdf_file) -> list:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         img_count = 0
 
-        for page_num in range(min(len(doc), 20)):  # Limit to first 20 pages
-            page = doc[page_num]
-
-            # Method 1: Try get_images() for embedded images
+        # First: Render key pages as images (more reliable for showing figures)
+        pages_to_render = min(len(doc), 10)  # First 10 pages
+        for page_num in range(pages_to_render):
             try:
+                page = doc[page_num]
+                # Render at 2x zoom for good quality
+                mat = fitz.Matrix(2.0, 2.0)
+                pix = page.get_pixmap(matrix=mat)
+                img_data = pix.tobytes("png")
+                pil_image = Image.open(io.BytesIO(img_data))
+
+                img_count += 1
+                images.append({
+                    'page': page_num + 1,
+                    'index': img_count,
+                    'image': pil_image.convert('RGB'),
+                    'width': pil_image.width,
+                    'height': pil_image.height,
+                    'type': 'page'
+                })
+                pix = None
+            except Exception as e:
+                logger.debug(f"Page render failed for page {page_num}: {e}")
+
+        # Second: Also try to extract embedded images (diagrams, photos)
+        for page_num in range(min(len(doc), 15)):
+            try:
+                page = doc[page_num]
                 image_list = page.get_images(full=True)
-                for img_index, img in enumerate(image_list[:5]):
+                for img_index, img in enumerate(image_list[:3]):  # Max 3 per page
                     try:
                         xref = img[0]
                         base_image = doc.extract_image(xref)
@@ -425,50 +448,27 @@ def extract_images_from_pdf(pdf_file) -> list:
                             image_bytes = base_image["image"]
                             pil_image = Image.open(io.BytesIO(image_bytes))
 
-                            # Only keep reasonably sized images (not icons/logos)
-                            if pil_image.width > 100 and pil_image.height > 100:
+                            # Only keep larger images (likely figures, not icons)
+                            if pil_image.width > 150 and pil_image.height > 150:
                                 img_count += 1
                                 images.append({
                                     'page': page_num + 1,
                                     'index': img_count,
                                     'image': pil_image.convert('RGB'),
                                     'width': pil_image.width,
-                                    'height': pil_image.height
+                                    'height': pil_image.height,
+                                    'type': 'embedded'
                                 })
-                    except Exception as e:
-                        logger.debug(f"Failed to extract embedded image: {e}")
+                    except Exception:
                         continue
-            except Exception as e:
-                logger.debug(f"get_images failed for page {page_num}: {e}")
-
-            # Method 2: Render page regions as images if no embedded images found
-            if len(images) == 0 and page_num < 5:
-                try:
-                    # Render full page at lower resolution for preview
-                    mat = fitz.Matrix(1.5, 1.5)  # 1.5x zoom
-                    pix = page.get_pixmap(matrix=mat)
-                    img_data = pix.tobytes("png")
-                    pil_image = Image.open(io.BytesIO(img_data))
-
-                    if pil_image.width > 100 and pil_image.height > 100:
-                        img_count += 1
-                        images.append({
-                            'page': page_num + 1,
-                            'index': img_count,
-                            'image': pil_image.convert('RGB'),
-                            'width': pil_image.width,
-                            'height': pil_image.height,
-                            'is_page_render': True
-                        })
-                    pix = None
-                except Exception as e:
-                    logger.debug(f"Page render failed: {e}")
+            except Exception:
+                continue
 
         doc.close()
     except Exception as e:
         logger.error(f"Image extraction failed: {e}")
 
-    return images[:15]  # Limit to 15 images
+    return images
 
 
 def extract_equations_from_text(text: str) -> list:
@@ -746,99 +746,118 @@ def render_equations():
 
 
 def render_figures():
-    """Render figures tab with actual images."""
+    """Render figures tab with page previews and embedded images."""
     images = st.session_state.images
     paper = st.session_state.paper
 
     st.markdown('<div class="section-title">🖼️ Figures & Images</div>', unsafe_allow_html=True)
 
-    # Show extracted images if available
-    if images:
-        # Separate page renders from actual images
-        actual_images = [img for img in images if not img.get('is_page_render')]
-        page_renders = [img for img in images if img.get('is_page_render')]
-
-        if actual_images:
-            st.markdown(f"Extracted **{len(actual_images)}** images from the paper:")
-
-            # Display images in a grid
-            cols_per_row = 2
-            for i in range(0, len(actual_images), cols_per_row):
-                cols = st.columns(cols_per_row)
-                for j, col in enumerate(cols):
-                    if i + j < len(actual_images):
-                        img_data = actual_images[i + j]
-                        with col:
-                            st.markdown(f"""
-                            <div class="figure-card">
-                                <div class="figure-header">
-                                    <div class="figure-icon">🖼️</div>
-                                    <div>
-                                        <div class="figure-title">Image {img_data['index']}</div>
-                                        <div class="figure-meta">Page {img_data['page']} • {img_data['width']}×{img_data['height']}px</div>
-                                    </div>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-
-                            # Display the actual image
-                            st.image(img_data['image'], use_container_width=True)
-
-                            if st.button(f"🔍 Explain", key=f"img_{i+j}"):
-                                ask(f"Describe what Figure/Image {img_data['index']} on page {img_data['page']} might represent based on the paper's content.")
-                                st.rerun()
-        elif page_renders:
-            st.markdown("**Page Previews** (no embedded images found, showing page renders):")
-            for img_data in page_renders:
-                st.markdown(f"""
-                <div class="figure-card">
-                    <div class="figure-header">
-                        <div class="figure-icon">📄</div>
-                        <div>
-                            <div class="figure-title">Page {img_data['page']} Preview</div>
-                            <div class="figure-meta">{img_data['width']}×{img_data['height']}px</div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                st.image(img_data['image'], use_container_width=True)
-
-    # Also show figure/table references from text
-    if paper:
-        figures = [f for f in paper.get('figures', []) if f.type in ['figure', 'table']]
-        if figures:
-            st.markdown("---")
-            st.markdown(f"**Figure/Table References** ({len(figures)} found in text):")
-            for fig in figures[:10]:
-                icon = "📊" if fig.type == "figure" else "📋"
-                st.markdown(f"""
-                <div class="figure-card">
-                    <div class="figure-header">
-                        <div class="figure-icon">{icon}</div>
-                        <div>
-                            <div class="figure-title">{fig.title}</div>
-                            <div class="figure-meta">{fig.type.title()} • Page {fig.page}</div>
-                        </div>
-                    </div>
-                    <div class="figure-caption">{fig.caption}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                if st.button(f"🔍 Explain {fig.title}", key=f"fig_{fig.id}"):
-                    ask(f"Explain {fig.title} in detail: {fig.caption}")
-                    st.rerun()
-
-    # Show message if nothing found
-    if not images and (not paper or not paper.get('figures')):
+    if not images:
         st.markdown("""
         <div class="image-placeholder">
             <div style="font-size: 2rem; margin-bottom: 0.5rem;">🖼️</div>
             <div>No figures could be extracted from this PDF</div>
             <div style="font-size: 0.8rem; margin-top: 0.5rem;">
-                This PDF may use vector graphics or have images in an unsupported format.
+                PyMuPDF library may not be installed.
             </div>
         </div>
         """, unsafe_allow_html=True)
+        return
+
+    # Separate page renders from embedded images
+    page_images = [img for img in images if img.get('type') == 'page']
+    embedded_images = [img for img in images if img.get('type') == 'embedded']
+
+    # Create sub-tabs for Pages and Embedded Images
+    if embedded_images:
+        fig_tab1, fig_tab2 = st.tabs([f"📄 Pages ({len(page_images)})", f"🖼️ Extracted ({len(embedded_images)})"])
+    else:
+        fig_tab1 = st.container()
+        fig_tab2 = None
+
+    # Page previews
+    with fig_tab1:
+        if page_images:
+            st.markdown(f"**{len(page_images)} pages** rendered from the PDF:")
+
+            # Page selector
+            page_nums = [img['page'] for img in page_images]
+            selected_page = st.selectbox(
+                "Jump to page:",
+                page_nums,
+                format_func=lambda x: f"Page {x}",
+                key="page_selector"
+            )
+
+            # Show selected page
+            for img_data in page_images:
+                if img_data['page'] == selected_page:
+                    st.markdown(f"""
+                    <div class="figure-card">
+                        <div class="figure-header">
+                            <div class="figure-icon">📄</div>
+                            <div>
+                                <div class="figure-title">Page {img_data['page']}</div>
+                                <div class="figure-meta">{img_data['width']}×{img_data['height']}px</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.image(img_data['image'], use_container_width=True)
+
+                    if st.button(f"🔍 Explain figures on this page", key=f"explain_page_{img_data['page']}"):
+                        ask(f"Describe and explain any figures, charts, tables, or diagrams that appear on page {img_data['page']} of this paper.")
+                        st.rerun()
+                    break
+
+            # Navigation buttons
+            col1, col2, col3 = st.columns([1, 2, 1])
+            current_idx = page_nums.index(selected_page)
+            with col1:
+                if current_idx > 0:
+                    if st.button("← Previous"):
+                        st.session_state.page_selector = page_nums[current_idx - 1]
+                        st.rerun()
+            with col3:
+                if current_idx < len(page_nums) - 1:
+                    if st.button("Next →"):
+                        st.session_state.page_selector = page_nums[current_idx + 1]
+                        st.rerun()
+
+    # Embedded images
+    if fig_tab2 is not None:
+        with fig_tab2:
+            if embedded_images:
+                st.markdown(f"**{len(embedded_images)} embedded images** extracted:")
+
+                cols_per_row = 2
+                for i in range(0, len(embedded_images), cols_per_row):
+                    cols = st.columns(cols_per_row)
+                    for j, col in enumerate(cols):
+                        if i + j < len(embedded_images):
+                            img_data = embedded_images[i + j]
+                            with col:
+                                st.markdown(f"""
+                                <div class="figure-card">
+                                    <div class="figure-header">
+                                        <div class="figure-icon">🖼️</div>
+                                        <div>
+                                            <div class="figure-title">Image from Page {img_data['page']}</div>
+                                            <div class="figure-meta">{img_data['width']}×{img_data['height']}px</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.image(img_data['image'], use_container_width=True)
+
+    # Also show figure references from text analysis
+    if paper:
+        figures = [f for f in paper.get('figures', []) if f.type in ['figure', 'table']]
+        if figures:
+            with st.expander(f"📝 Figure/Table References ({len(figures)} mentioned in text)"):
+                for fig in figures[:10]:
+                    icon = "📊" if fig.type == "figure" else "📋"
+                    st.markdown(f"**{icon} {fig.title}** (Page {fig.page}): {fig.caption}")
 
 
 def sanitize_html(text: str) -> str:
