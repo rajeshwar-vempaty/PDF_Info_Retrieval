@@ -18,6 +18,7 @@ from src.pdf_processor import PDFProcessor, PDFProcessingError
 from src.text_processor import TextProcessor
 from src.vector_store import VectorStoreManager, VectorStoreError
 from src.conversation import ConversationManager, ConversationError
+from src.document_analyzer import DocumentAnalyzer
 from src.ui.templates import ChatTemplates
 
 # Configure logging
@@ -45,83 +46,65 @@ def initialize_session_state():
     if "conversation_manager" not in st.session_state:
         st.session_state.conversation_manager = ConversationManager(st.session_state.config)
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    if "document_analyzer" not in st.session_state:
+        st.session_state.document_analyzer = DocumentAnalyzer(st.session_state.config)
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
     if "documents_processed" not in st.session_state:
         st.session_state.documents_processed = False
 
-    if "source_documents" not in st.session_state:
-        st.session_state.source_documents = []
+    if "document_analysis" not in st.session_state:
+        st.session_state.document_analysis = None
 
-    if "full_chat_history" not in st.session_state:
-        st.session_state.full_chat_history = []
+    if "raw_text" not in st.session_state:
+        st.session_state.raw_text = ""
 
 
 def process_documents(pdf_docs):
-    """
-    Process uploaded PDF documents through the RAG pipeline.
-
-    Args:
-        pdf_docs: List of uploaded PDF file objects.
-
-    Returns:
-        bool: True if processing succeeded, False otherwise.
-    """
+    """Process uploaded PDF documents through the RAG pipeline."""
     try:
         # Step 1: Extract text from PDFs
-        with st.spinner("Extracting text from PDFs..."):
+        with st.spinner("📄 Extracting text from PDFs..."):
             raw_text = st.session_state.pdf_processor.extract_text_from_files(pdf_docs)
 
             if not raw_text.strip():
                 st.error("No text could be extracted from the uploaded documents.")
                 return False
 
-            # Show processing summary
-            summary = st.session_state.pdf_processor.get_processing_summary()
-            if summary['failed_count'] > 0:
-                st.warning(
-                    f"Failed to process {summary['failed_count']} file(s): "
-                    f"{', '.join(summary['failed_files'])}"
-                )
+            st.session_state.raw_text = raw_text
 
-        # Step 2: Clean and chunk text
-        with st.spinner("Processing and chunking text..."):
+        # Step 2: Analyze document
+        with st.spinner("🔍 Analyzing document..."):
+            analysis = st.session_state.document_analyzer.analyze_document(raw_text)
+            st.session_state.document_analysis = analysis
+
+        # Step 3: Clean and chunk text
+        with st.spinner("✂️ Processing and chunking text..."):
             text_chunks = st.session_state.text_processor.process(raw_text)
 
             if not text_chunks:
                 st.error("Failed to create text chunks from the documents.")
                 return False
 
-            st.info(f"Created {len(text_chunks)} text chunks from your documents.")
-
-        # Step 3: Create vector store
-        with st.spinner("Creating embeddings and vector store..."):
+        # Step 4: Create vector store
+        with st.spinner("🧠 Creating embeddings..."):
             vectorstore = st.session_state.vectorstore_manager.create_vectorstore(
                 text_chunks
             )
 
-        # Step 4: Initialize conversation chain
-        with st.spinner("Setting up conversation chain..."):
+        # Step 5: Initialize conversation chain
+        with st.spinner("💬 Setting up AI assistant..."):
             st.session_state.conversation_manager.create_chain(vectorstore)
 
         st.session_state.documents_processed = True
-        st.success("Documents processed successfully! You can now ask questions.")
+        st.session_state.messages = []  # Clear previous messages
         return True
 
-    except PDFProcessingError as e:
-        st.error(f"Error processing PDFs: {str(e)}")
-        logger.error(f"PDF processing error: {e}")
-        return False
-
-    except VectorStoreError as e:
-        st.error(f"Error creating vector store: {str(e)}")
-        logger.error(f"Vector store error: {e}")
-        return False
-
-    except ConversationError as e:
-        st.error(f"Error setting up conversation: {str(e)}")
-        logger.error(f"Conversation error: {e}")
+    except (PDFProcessingError, VectorStoreError, ConversationError) as e:
+        st.error(f"Error: {str(e)}")
+        logger.error(f"Processing error: {e}")
         return False
 
     except Exception as e:
@@ -130,205 +113,302 @@ def process_documents(pdf_docs):
         return False
 
 
-def handle_user_input(user_question: str):
-    """
-    Handle user question and display response.
+def display_document_analysis():
+    """Display document analysis panel."""
+    if st.session_state.document_analysis:
+        analysis = st.session_state.document_analysis
 
-    Args:
-        user_question: The user's question about the documents.
-    """
-    if not st.session_state.documents_processed:
-        st.error("Please upload and process your PDF documents before asking questions.")
-        return
+        # Document Statistics
+        st.subheader("📊 Document Statistics")
+        cols = st.columns(4)
+        stats = analysis.get('stats', {})
+        stat_items = list(stats.items())
+        icons = {'words': '📝', 'characters': '🔤', 'sentences': '💬', 'reading_time': '⏱️'}
 
-    if not st.session_state.conversation_manager.is_initialized:
-        st.error("Conversation not initialized. Please process documents first.")
-        return
-
-    try:
-        # Get response from conversation chain
-        response = st.session_state.conversation_manager.ask(user_question)
-
-        # Update chat history in session state
-        st.session_state.chat_history = response.get('chat_history', [])
-        st.session_state.source_documents = response.get('source_documents', [])
-
-        # Store in full chat history for export
-        st.session_state.full_chat_history.append({
-            'timestamp': datetime.now().isoformat(),
-            'question': user_question,
-            'answer': response.get('answer', ''),
-            'sources': [
-                doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-                for doc in st.session_state.source_documents
-            ]
-        })
-
-        # Display chat history
-        if st.session_state.chat_history:
-            if response.get('is_relevant', True):
-                for i, message in enumerate(st.session_state.chat_history):
-                    content = message.content if hasattr(message, 'content') else str(message)
-                    if i % 2 == 0:  # User messages
-                        st.write(
-                            ChatTemplates.render_user_message(content),
-                            unsafe_allow_html=True
-                        )
-                    else:  # Bot messages
-                        st.write(
-                            ChatTemplates.render_bot_message(content),
-                            unsafe_allow_html=True
-                        )
-
-                # Display source citations
-                if st.session_state.source_documents:
-                    display_source_citations(st.session_state.source_documents)
-            else:
-                st.write(
-                    ChatTemplates.render_warning_message(
-                        "There is no relevant information in the document "
-                        "related to your question."
-                    ),
-                    unsafe_allow_html=True
+        for i, (key, value) in enumerate(stat_items):
+            with cols[i % 4]:
+                icon = icons.get(key, '📊')
+                st.metric(
+                    label=f"{icon} {key.replace('_', ' ').title()}",
+                    value=value
                 )
 
+        # Keywords
+        st.subheader("🏷️ Key Topics")
+        keywords = analysis.get('keywords', [])
+        if keywords:
+            keyword_html = " ".join([
+                f'<span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); '
+                f'color: white; padding: 5px 12px; border-radius: 20px; margin: 3px; '
+                f'display: inline-block; font-size: 0.9rem;">{kw}</span>'
+                for kw in keywords[:12]
+            ])
+            st.markdown(keyword_html, unsafe_allow_html=True)
+
+        # Summary
+        st.subheader("📋 Document Summary")
+        summary = analysis.get('summary', '')
+        if summary:
+            st.info(summary)
+
+        # Suggested Questions
+        st.subheader("💡 Try Asking")
+        questions = analysis.get('suggested_questions', [])
+        if questions:
+            for q in questions[:5]:
+                if st.button(f"❓ {q}", key=f"q_{hash(q)}"):
+                    st.session_state.pending_question = q
+                    st.rerun()
+
+
+def display_chat():
+    """Display chat messages."""
+    for message in st.session_state.messages:
+        if message["role"] == "user":
+            st.markdown(
+                ChatTemplates.render_user_message(message["content"]),
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                ChatTemplates.render_bot_message(message["content"]),
+                unsafe_allow_html=True
+            )
+            # Show sources if available
+            if message.get("sources"):
+                with st.expander("📚 View Sources", expanded=False):
+                    for i, source in enumerate(message["sources"], 1):
+                        st.markdown(
+                            ChatTemplates.render_source_citation(i, source),
+                            unsafe_allow_html=True
+                        )
+
+
+def handle_question(question: str):
+    """Process a question and get response."""
+    if not st.session_state.documents_processed:
+        st.error("Please upload and process documents first.")
+        return
+
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": question})
+
+    try:
+        with st.spinner("🤔 Thinking..."):
+            response = st.session_state.conversation_manager.ask(question)
+
+        answer = response.get('answer', 'Sorry, I could not find an answer.')
+        sources = []
+
+        if response.get('source_documents'):
+            sources = [
+                doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content
+                for doc in response['source_documents'][:3]
+            ]
+
+        # Add assistant message
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "sources": sources
+        })
+
     except ConversationError as e:
-        st.error(f"Error processing your question: {str(e)}")
-        logger.error(f"Conversation error: {e}")
-
-
-def display_source_citations(source_documents):
-    """
-    Display source citations from retrieved documents.
-
-    Args:
-        source_documents: List of source document objects.
-    """
-    with st.expander("View Source Citations", expanded=False):
-        st.markdown("**Relevant passages from your documents:**")
-        for i, doc in enumerate(source_documents, 1):
-            content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
-            # Truncate long content
-            if len(content) > 500:
-                content = content[:500] + "..."
-            st.markdown(f"**Source {i}:**")
-            st.markdown(f"> {content}")
-            st.divider()
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": f"Sorry, I encountered an error: {str(e)}"
+        })
 
 
 def export_chat_history():
-    """
-    Export chat history as JSON.
-
-    Returns:
-        str: JSON string of chat history.
-    """
+    """Export chat history as JSON."""
     export_data = {
         'exported_at': datetime.now().isoformat(),
         'application': 'ResearchAI - PDF Info Retrieval',
-        'conversations': st.session_state.full_chat_history
+        'conversations': st.session_state.messages
     }
     return json.dumps(export_data, indent=2)
 
 
 def render_sidebar():
-    """Render the sidebar with document upload and settings."""
+    """Render the sidebar."""
     with st.sidebar:
-        st.subheader("Document Upload")
+        # Logo/Brand
+        st.markdown("""
+        <div style="text-align: center; padding: 1rem 0;">
+            <h1 style="color: #667eea; margin: 0;">📚 ResearchAI</h1>
+            <p style="color: #666; font-size: 0.9rem;">Intelligent Document Analysis</p>
+        </div>
+        """, unsafe_allow_html=True)
 
+        st.divider()
+
+        # Upload Section
+        st.subheader("📤 Upload Documents")
         pdf_docs = st.file_uploader(
-            "Upload your PDFs here and click 'Process'",
+            "Drop your PDF files here",
             accept_multiple_files=True,
-            type=['pdf']
+            type=['pdf'],
+            label_visibility="collapsed"
         )
 
-        if st.button("Process", type="primary"):
+        if st.button("🚀 Process Documents", type="primary", use_container_width=True):
             if pdf_docs:
-                process_documents(pdf_docs)
+                if process_documents(pdf_docs):
+                    st.success("✅ Ready to chat!")
+                    st.rerun()
             else:
-                st.warning("Please upload at least one PDF document.")
+                st.warning("Please upload at least one PDF.")
 
-        # Display processing status
         if st.session_state.documents_processed:
-            st.success("Documents ready for questions!")
+            st.success("✅ Documents loaded")
 
         st.divider()
 
-        # Settings section
-        st.subheader("Settings")
+        # Actions
+        st.subheader("⚙️ Actions")
 
-        # Clear conversation button
-        if st.button("Clear Conversation"):
-            st.session_state.conversation_manager.clear_history()
-            st.session_state.chat_history = []
-            st.session_state.full_chat_history = []
-            st.session_state.source_documents = []
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗑️ Clear Chat", use_container_width=True):
+                st.session_state.messages = []
+                st.session_state.conversation_manager.clear_history()
+                st.rerun()
 
-        # Reset all button
-        if st.button("Reset All"):
-            st.session_state.conversation_manager.reset()
-            st.session_state.chat_history = []
-            st.session_state.full_chat_history = []
-            st.session_state.source_documents = []
-            st.session_state.documents_processed = False
-            st.rerun()
+        with col2:
+            if st.button("🔄 Reset All", use_container_width=True):
+                for key in ['messages', 'documents_processed', 'document_analysis', 'raw_text']:
+                    if key in st.session_state:
+                        st.session_state[key] = [] if key == 'messages' else None if key != 'raw_text' else ""
+                st.session_state.documents_processed = False
+                st.session_state.conversation_manager.reset()
+                st.rerun()
 
-        st.divider()
-
-        # Export section
-        st.subheader("Export")
-
-        if st.session_state.full_chat_history:
-            export_data = export_chat_history()
+        # Export
+        if st.session_state.messages:
+            st.divider()
+            st.subheader("📥 Export")
             st.download_button(
-                label="Download Chat History",
-                data=export_data,
-                file_name=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json"
+                label="💾 Download Chat",
+                data=export_chat_history(),
+                file_name=f"research_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
             )
-        else:
-            st.caption("No conversation to export yet.")
+
+        # Footer
+        st.divider()
+        st.markdown("""
+        <div style="text-align: center; color: #888; font-size: 0.8rem;">
+            <p>Built with ❤️ using LangChain & Streamlit</p>
+            <p>© 2024 ResearchAI</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def main():
     """Main application entry point."""
     # Page configuration
-    config = Config()
     st.set_page_config(
-        page_title=config.page_title,
-        page_icon=config.page_icon,
-        layout="wide"
+        page_title="ResearchAI - Document Intelligence",
+        page_icon="📚",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
 
     # Apply CSS styles
-    st.write(ChatTemplates.get_css(), unsafe_allow_html=True)
+    st.markdown(ChatTemplates.get_css(), unsafe_allow_html=True)
 
     # Initialize session state
     initialize_session_state()
 
-    # Render header
-    st.header(f"{config.page_title} {config.page_icon}")
-
-    st.markdown("""
-    Upload your research papers or PDF documents and ask questions about their content.
-    The system uses AI to find relevant information and provide accurate answers.
-    """)
-
     # Render sidebar
     render_sidebar()
 
-    # Main content area
-    st.divider()
+    # Main content
+    if not st.session_state.documents_processed:
+        # Welcome screen
+        st.markdown("""
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <h1 style="color: #667eea; font-size: 3rem;">📚 ResearchAI</h1>
+            <h3 style="color: #666; font-weight: normal;">Intelligent Document Analysis & Q&A</h3>
+            <p style="color: #888; max-width: 600px; margin: 1rem auto;">
+                Upload your research papers, reports, or any PDF documents.
+                Our AI will analyze them and answer your questions with source citations.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # Question input
-    user_question = st.text_input(
-        "Ask a question about your documents:",
-        placeholder="e.g., What are the main findings of the research?"
-    )
+        # Features
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("""
+            <div style="text-align: center; padding: 1.5rem; background: #f8f9fa; border-radius: 10px;">
+                <h2>🔍</h2>
+                <h4>Smart Analysis</h4>
+                <p style="color: #666; font-size: 0.9rem;">Automatic keyword extraction, summaries, and document statistics</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown("""
+            <div style="text-align: center; padding: 1.5rem; background: #f8f9fa; border-radius: 10px;">
+                <h2>💬</h2>
+                <h4>Natural Q&A</h4>
+                <p style="color: #666; font-size: 0.9rem;">Ask questions in plain English and get accurate answers</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            st.markdown("""
+            <div style="text-align: center; padding: 1.5rem; background: #f8f9fa; border-radius: 10px;">
+                <h2>📚</h2>
+                <h4>Source Citations</h4>
+                <p style="color: #666; font-size: 0.9rem;">Every answer comes with relevant source passages</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-    if user_question:
-        handle_user_input(user_question)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.info("👈 Upload your PDF documents from the sidebar to get started!")
+
+    else:
+        # Document processed - show analysis and chat
+        tab1, tab2 = st.tabs(["💬 Chat", "📊 Document Analysis"])
+
+        with tab1:
+            st.subheader("💬 Ask Questions About Your Documents")
+
+            # Display chat history
+            chat_container = st.container()
+            with chat_container:
+                display_chat()
+
+            # Check for pending question from suggested questions
+            if "pending_question" in st.session_state:
+                question = st.session_state.pending_question
+                del st.session_state.pending_question
+                handle_question(question)
+                st.rerun()
+
+            # Chat input
+            st.divider()
+            question = st.chat_input("Type your question here...")
+
+            if question:
+                handle_question(question)
+                st.rerun()
+
+            # Quick suggestions if no messages yet
+            if not st.session_state.messages and st.session_state.document_analysis:
+                st.markdown("**💡 Quick Start - Try these questions:**")
+                questions = st.session_state.document_analysis.get('suggested_questions', [])
+                cols = st.columns(min(len(questions), 3))
+                for i, q in enumerate(questions[:3]):
+                    with cols[i]:
+                        if st.button(q, key=f"quick_{i}", use_container_width=True):
+                            handle_question(q)
+                            st.rerun()
+
+        with tab2:
+            display_document_analysis()
 
 
 if __name__ == '__main__':
