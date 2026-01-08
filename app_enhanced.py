@@ -31,8 +31,8 @@ CUSTOM_CSS = """
     background-color: #0f172a;
 }
 
-/* Hide defaults */
-#MainMenu, footer, header {visibility: hidden;}
+/* Hide only footer */
+footer {visibility: hidden;}
 
 /* Scrollbar */
 ::-webkit-scrollbar {width: 6px; height: 6px;}
@@ -264,12 +264,23 @@ div[data-testid="stMetricLabel"] {
 }
 
 section[data-testid="stSidebar"] {
-    background: #1e293b;
-    border-right: 1px solid #334155;
+    background: #1e293b !important;
+    border-right: 1px solid #334155 !important;
+    min-width: 250px !important;
+}
+
+section[data-testid="stSidebar"] > div {
+    background: #1e293b !important;
 }
 
 section[data-testid="stSidebar"] .stMarkdown {
-    color: #f1f5f9;
+    color: #f1f5f9 !important;
+}
+
+/* Ensure sidebar is visible */
+[data-testid="stSidebar"][aria-expanded="true"] {
+    display: block !important;
+    visibility: visible !important;
 }
 
 /* Radio buttons compact */
