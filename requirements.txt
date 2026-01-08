@@ -4,11 +4,11 @@
 # Core Framework
 streamlit>=1.28.0
 
-# LangChain and AI
-langchain>=0.1.0
-langchain-community>=0.0.13
-langchain-openai>=0.0.5
-openai>=1.3.0
+# LangChain and AI - Pinned versions for compatibility
+langchain==0.1.20
+langchain-community==0.0.38
+langchain-openai==0.1.3
+openai>=1.12.0
 
 # Embeddings
 sentence-transformers>=2.2.2

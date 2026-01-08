@@ -80,7 +80,7 @@ class ConversationManager:
         try:
             # Initialize LLM
             llm = ChatOpenAI(
-                model_name=self.config.llm_model_name,
+                model=self.config.llm_model_name,
                 temperature=self.config.llm_temperature
             )
 
