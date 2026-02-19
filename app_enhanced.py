@@ -884,7 +884,7 @@ def render_sidebar():
 
         files = st.file_uploader("Upload PDF", type=['pdf'], accept_multiple_files=True, label_visibility="collapsed")
 
-        if st.button("Analyze Paper", type="primary", use_container_width=True):
+        if st.button("Analyze Paper", type="primary", width="stretch"):
             if files:
                 if process_pdf(files):
                     st.rerun()
@@ -912,7 +912,7 @@ def render_sidebar():
             st.markdown("**Paper Sections**")
             for sec in st.session_state.sections:
                 label = f"{sec['number']} {sec['name']}" if sec['number'] else sec['name']
-                if st.button(f"  {label}", key=f"nav_{sec['position']}", use_container_width=True):
+                if st.button(f"  {label}", key=f"nav_{sec['position']}", width="stretch"):
                     ask(f"Summarize the '{sec['name']}' section of this paper.")
                     st.rerun()
 
@@ -920,7 +920,7 @@ def render_sidebar():
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("Clear Chat", use_container_width=True):
+            if st.button("Clear Chat", width="stretch"):
                 st.session_state.messages = []
                 if "eq_explanations" in st.session_state:
                     st.session_state.eq_explanations = {}
@@ -929,7 +929,7 @@ def render_sidebar():
                 st.session_state.conversation_manager.clear_history()
                 st.rerun()
         with c2:
-            if st.button("Reset All", use_container_width=True):
+            if st.button("Reset All", width="stretch"):
                 for k in list(st.session_state.keys()):
                     del st.session_state[k]
                 st.rerun()
@@ -1211,7 +1211,7 @@ def render_figures():
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.image(img_data['image'], use_container_width=True)
+                    st.image(img_data['image'], width="stretch")
 
                     if st.button(f"Explain figures on this page", key=f"explain_page_{img_data['page']}"):
                         ask(f"Describe and explain any figures, charts, tables, or diagrams that appear on page {img_data['page']} of this paper.")
@@ -1241,7 +1241,7 @@ def render_figures():
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
-                                st.image(img_data['image'], use_container_width=True)
+                                st.image(img_data['image'], width="stretch")
 
     # Also show figure references from text analysis
     if paper:
@@ -1340,7 +1340,7 @@ def render_chat():
 
     for i, (label, q) in enumerate(actions):
         with [c1, c2, c3, c4][i]:
-            if st.button(label, use_container_width=True):
+            if st.button(label, width="stretch"):
                 ask(q)
                 st.rerun()
 
@@ -1354,7 +1354,7 @@ def render_chat():
     ]
     for i, (label, q) in enumerate(actions2):
         with [c5, c6, c7, c8][i]:
-            if st.button(label, use_container_width=True):
+            if st.button(label, width="stretch"):
                 ask(q)
                 st.rerun()
 
@@ -1508,7 +1508,7 @@ def render_notes():
             data=export_content,
             file_name=f"papermind_notes_{st.session_state.filename or 'paper'}.txt",
             mime="text/plain",
-            use_container_width=True,
+            width="stretch",
         )
     else:
         st.caption("No notes yet. Start adding notes as you read!")
