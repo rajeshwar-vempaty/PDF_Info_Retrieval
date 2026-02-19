@@ -8,9 +8,9 @@ retrieval chains for question answering over documents.
 import logging
 from typing import Optional, List, Dict, Any
 
-from langchain.chat_models import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
+from langchain_openai import ChatOpenAI
+from langchain_classic.memory import ConversationBufferMemory
+from langchain_classic.chains import ConversationalRetrievalChain
 
 from src.config import Config, default_config
 
@@ -129,7 +129,7 @@ class ConversationManager:
             )
 
         try:
-            response = self._chain({'question': question})
+            response = self._chain.invoke({'question': question})
 
             # Extract answer
             answer = ""
