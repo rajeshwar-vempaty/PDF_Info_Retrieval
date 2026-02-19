@@ -20,6 +20,13 @@ from src.config import Config
 
 def check_api_key() -> bool:
     """Check if OpenAI API key is configured."""
+    # Explicitly load .env file
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     # Check environment variable
     if os.getenv("OPENAI_API_KEY"):
         return True
@@ -606,7 +613,16 @@ def process_pdf(files):
         return True
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        error_str = str(e)
+        if "401" in error_str or "Unauthorized" in error_str or "auth" in error_str.lower():
+            st.error(
+                "**Authentication failed.** Your OpenAI API key was rejected. "
+                "Please check that your key is valid and has billing enabled at "
+                "[platform.openai.com](https://platform.openai.com/api-keys). "
+                "You can update your key in the sidebar under '🔑 API Key'."
+            )
+        else:
+            st.error(f"Error: {e}")
         logger.exception("Processing error")
         return False
 
@@ -630,7 +646,13 @@ def ask(question):
             "sources": sources
         })
     except Exception as e:
-        st.session_state.messages.append({"role": "assistant", "content": f"Error: {e}"})
+        error_str = str(e)
+        if "401" in error_str or "Unauthorized" in error_str or "auth" in error_str.lower():
+            msg = ("**Authentication error.** Your OpenAI API key is invalid or expired. "
+                   "Update it in the sidebar under '🔑 API Key'.")
+        else:
+            msg = f"Error: {e}"
+        st.session_state.messages.append({"role": "assistant", "content": msg})
 
 
 def render_sidebar():
@@ -645,6 +667,21 @@ def render_sidebar():
             <p style="color: #94a3b8; font-size: 0.8rem; margin: 0;">AI Research Assistant</p>
         </div>
         """, unsafe_allow_html=True)
+
+        st.divider()
+
+        # API key input (allows override without editing .env)
+        with st.expander("🔑 API Key", expanded=not bool(os.getenv("OPENAI_API_KEY"))):
+            api_key_input = st.text_input(
+                "OpenAI API Key",
+                value=os.getenv("OPENAI_API_KEY", ""),
+                type="password",
+                label_visibility="collapsed",
+                placeholder="sk-...",
+            )
+            if api_key_input and api_key_input != os.getenv("OPENAI_API_KEY", ""):
+                os.environ["OPENAI_API_KEY"] = api_key_input
+                st.success("API key updated")
 
         st.divider()
 
