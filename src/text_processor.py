@@ -71,11 +71,54 @@ class TextProcessor:
             re.IGNORECASE
         )
 
+    def _fix_reversed_text(self, text: str) -> str:
+        """
+        Detect and fix reversed text from PDF extraction.
+
+        Some PDF renderers extract text in reverse order due to
+        right-to-left rendering or font encoding issues. This detects
+        reversed words and fixes them.
+        """
+        # Common English words to check against
+        common_words = frozenset([
+            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can',
+            'had', 'her', 'was', 'one', 'our', 'out', 'has', 'his', 'how',
+            'its', 'may', 'new', 'now', 'old', 'see', 'way', 'who', 'did',
+            'get', 'let', 'say', 'she', 'too', 'use', 'with', 'this', 'that',
+            'have', 'from', 'they', 'been', 'said', 'each', 'which', 'their',
+            'will', 'other', 'about', 'many', 'then', 'them', 'these', 'some',
+            'would', 'make', 'like', 'into', 'time', 'very', 'when', 'come',
+            'could', 'more', 'than', 'first', 'also', 'made', 'after', 'model',
+            'data', 'input', 'output', 'method', 'result', 'paper', 'based',
+            'using', 'used', 'show', 'work', 'system', 'learning', 'network',
+            'training', 'performance', 'attention', 'layer', 'function',
+        ])
+
+        words = text.split()
+        if len(words) < 20:
+            return text
+
+        # Sample words to detect if text is reversed
+        sample_size = min(100, len(words))
+        sample = words[:sample_size]
+
+        normal_hits = sum(1 for w in sample if w.lower() in common_words)
+        reversed_hits = sum(1 for w in sample if w[::-1].lower() in common_words)
+
+        # If significantly more reversed words match, the text is reversed
+        if reversed_hits > normal_hits * 2 and reversed_hits > 5:
+            logger.warning("Detected reversed text, applying fix")
+            words = [w[::-1] for w in words]
+            text = ' '.join(words)
+
+        return text
+
     def clean_text(self, text: str) -> str:
         """
         Clean extracted text by removing noise and normalizing formatting.
 
         Performs the following operations:
+        - Detects and fixes reversed text from PDF extraction
         - Converts text to lowercase
         - Removes email addresses, brackets, figure/table captions
         - Removes non-ASCII characters
@@ -89,6 +132,9 @@ class TextProcessor:
         """
         if not text:
             return ""
+
+        # Fix reversed text before other processing
+        text = self._fix_reversed_text(text)
 
         # Convert to lowercase
         text = text.lower()

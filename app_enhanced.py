@@ -24,7 +24,7 @@ def check_api_key() -> bool:
     try:
         from dotenv import load_dotenv
         load_dotenv()
-    except ImportError:
+    except (ImportError, Exception):
         pass
 
     # Check environment variable
@@ -190,6 +190,95 @@ def fetch_scholar_citations(title: str) -> dict:
     return result
 
 
+def extract_paper_metadata(text: str) -> dict:
+    """Extract metadata from paper text: title, authors, year, DOI."""
+    metadata = {
+        'title': None,
+        'authors': [],
+        'year': None,
+        'doi': None,
+    }
+
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    if not lines:
+        return metadata
+
+    # Title: usually the longest of the first few lines
+    candidate_lines = lines[:8]
+    title_candidates = [
+        l for l in candidate_lines
+        if 10 < len(l) < 250
+        and not re.match(r'^\d+$', l)
+        and not re.match(r'^(abstract|introduction|page)', l, re.IGNORECASE)
+    ]
+    if title_candidates:
+        metadata['title'] = max(title_candidates, key=lambda l: len(l))
+
+    # Year
+    year_match = re.search(r'\b(19|20)\d{2}\b', text[:3000])
+    if year_match:
+        metadata['year'] = year_match.group(0)
+
+    # DOI
+    doi_match = re.search(r'(10\.\d{4,}/[^\s]+)', text[:5000])
+    if doi_match:
+        metadata['doi'] = doi_match.group(1).rstrip('.')
+
+    # Authors: look for comma-separated names before abstract
+    abstract_pos = re.search(r'\babstract\b', text, re.IGNORECASE)
+    pre_abstract = text[:abstract_pos.start()] if abstract_pos else text[:2000]
+    author_match = re.search(
+        r'(?:^|\n)\s*([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+(?:\s*,\s*[A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)+)',
+        pre_abstract
+    )
+    if author_match:
+        author_str = author_match.group(1)
+        authors = [a.strip() for a in re.split(r',\s*(?:and\s+)?', author_str) if a.strip()]
+        metadata['authors'] = authors[:10]
+
+    return metadata
+
+
+def extract_sections(text: str) -> list:
+    """Extract section structure from paper text."""
+    sections = []
+    section_pattern = re.compile(
+        r'(?:^|\n)\s*'
+        r'(\d+\.?\s+)?'
+        r'(Abstract|Introduction|Related\s+Work|Background|'
+        r'Method(?:ology|s)?|Approach|Framework|'
+        r'Experiment(?:s|al)?(?:\s+(?:Setup|Results))?|'
+        r'Results?(?:\s+and\s+Discussion)?|'
+        r'Discussion|Analysis|Evaluation|'
+        r'Conclusion(?:s)?(?:\s+and\s+Future\s+Work)?|'
+        r'Future\s+Work|Limitations|'
+        r'Acknowledgment(?:s)?|References|Appendix)'
+        r'\s*(?:\n|$)',
+        re.IGNORECASE | re.MULTILINE
+    )
+
+    for match in section_pattern.finditer(text):
+        section_num = match.group(1) or ""
+        section_name = match.group(2).strip()
+        page = max(1, match.start() // 3000 + 1)
+        content_start = match.end()
+        content_preview = text[content_start:content_start + 300].strip()
+        if '.' in content_preview:
+            content_preview = content_preview[:content_preview.rfind('.') + 1]
+        if len(content_preview) > 200:
+            content_preview = content_preview[:200].rsplit(' ', 1)[0] + "..."
+
+        sections.append({
+            'number': section_num.strip(),
+            'name': section_name,
+            'page': page,
+            'position': match.start(),
+            'preview': content_preview,
+        })
+
+    return sections
+
+
 # ==================== CSS ====================
 CSS = """
 <style>
@@ -219,12 +308,92 @@ section[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
 .card {
     background: #1e293b;
     border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 1rem;
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.2s;
+}
+.card:hover { border-color: #8b5cf6; }
+.card-title { font-weight: 600; color: #f1f5f9 !important; font-size: 0.95rem; }
+.card-content { color: #cbd5e1 !important; font-size: 0.85rem; line-height: 1.6; }
+
+/* Paper metadata header */
+.paper-header {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid #334155;
+    border-radius: 16px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+.paper-title-main {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #f1f5f9 !important;
+    line-height: 1.4;
     margin-bottom: 0.75rem;
 }
-.card-title { font-weight: 600; color: #f1f5f9 !important; font-size: 0.9rem; }
-.card-content { color: #cbd5e1 !important; font-size: 0.85rem; line-height: 1.5; }
+.paper-authors { color: #a78bfa !important; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.paper-meta-item {
+    display: inline-block;
+    background: rgba(139, 92, 246, 0.15);
+    color: #c4b5fd !important;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    margin-right: 0.5rem;
+    margin-bottom: 0.3rem;
+}
+
+/* Section navigation */
+.section-nav {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+.section-nav-item {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    color: #cbd5e1 !important;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+}
+.section-num { color: #8b5cf6 !important; font-weight: 600; margin-right: 0.5rem; }
+.section-page { color: #64748b !important; font-size: 0.75rem; float: right; }
+
+/* Problem cards for welcome page */
+.problem-card {
+    background: rgba(139, 92, 246, 0.08);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+}
+.problem-title { color: #a78bfa !important; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.25rem; }
+.problem-desc { color: #cbd5e1 !important; font-size: 0.8rem; }
+
+/* Notes */
+.note-card {
+    background: rgba(234, 179, 8, 0.08);
+    border: 1px solid rgba(234, 179, 8, 0.25);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+}
+.note-timestamp { color: #94a3b8 !important; font-size: 0.7rem; }
+
+/* Search results */
+.search-result {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-left: 3px solid #8b5cf6;
+    border-radius: 0 8px 8px 0;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+.search-highlight { background: rgba(139, 92, 246, 0.3); padding: 0.1rem 0.3rem; border-radius: 3px; }
 
 /* Equation display */
 .equation-card {
@@ -369,6 +538,21 @@ section[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
 }
 .welcome-sub { color: #94a3b8 !important; text-align: center; font-size: 1.1rem; margin-bottom: 1.5rem; }
 
+/* Feature cards for welcome */
+.feature-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    min-height: 140px;
+    transition: all 0.2s;
+}
+.feature-card:hover { border-color: #8b5cf6; transform: translateY(-2px); }
+.feature-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.feature-title { font-weight: 600; color: #f1f5f9 !important; font-size: 0.95rem; margin-bottom: 0.25rem; }
+.feature-desc { color: #94a3b8 !important; font-size: 0.8rem; }
+
 /* Terms */
 .term-card {
     background: #1e293b;
@@ -415,10 +599,21 @@ div[data-testid="stMetricLabel"] { color: #94a3b8 !important; font-size: 0.75rem
 .stExpander { background: #1e293b; border: 1px solid #334155; border-radius: 8px; }
 .stExpander summary span { color: #f1f5f9 !important; }
 
-.stTextInput input { background: #1e293b !important; border: 1px solid #334155 !important; color: #f1f5f9 !important; }
+.stTextInput input, .stTextArea textarea {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    color: #f1f5f9 !important;
+    border-radius: 8px !important;
+}
 
 .stInfo { background: rgba(139, 92, 246, 0.1) !important; border: 1px solid rgba(139, 92, 246, 0.3) !important; }
 .stInfo p { color: #e0e7ff !important; }
+
+.stDownloadButton > button {
+    background: linear-gradient(135deg, #059669, #10b981) !important;
+    border: none !important;
+    color: white !important;
+}
 </style>
 """
 
@@ -564,7 +759,8 @@ def init_state():
     defaults = [("messages", []), ("processed", False), ("analysis", None),
                 ("paper", None), ("text", ""), ("filename", None),
                 ("level", "detailed"), ("images", []), ("equations", []),
-                ("citations", None), ("paper_title", None)]
+                ("citations", None), ("paper_title", None),
+                ("metadata", {}), ("sections", []), ("notes", [])]
     for key, val in defaults:
         if key not in st.session_state:
             st.session_state[key] = val
@@ -588,23 +784,24 @@ def process_pdf(files):
         with st.spinner("Finding equations..."):
             st.session_state.equations = extract_equations_from_text(text)
 
-        with st.spinner("Analyzing paper..."):
+        with st.spinner("Analyzing paper structure..."):
             st.session_state.paper = st.session_state.paper_analyzer.analyze_paper(text)
             st.session_state.analysis = st.session_state.document_analyzer.analyze_document(text)
+            st.session_state.metadata = extract_paper_metadata(text)
+            st.session_state.sections = extract_sections(text)
 
         with st.spinner("Building search index..."):
             chunks = st.session_state.text_processor.process(text)
             vectorstore = st.session_state.vectorstore_manager.create_vectorstore(chunks)
             st.session_state.conversation_manager.create_chain(vectorstore)
 
-        # Extract paper title (first non-empty line, likely the title)
         with st.spinner("Looking up citations..."):
-            lines = [l.strip() for l in text.split('\n') if l.strip()]
-            paper_title = lines[0] if lines else None
-            # Titles are usually the longest of the first few lines
-            candidate_lines = lines[:5] if len(lines) >= 5 else lines
-            if candidate_lines:
-                paper_title = max(candidate_lines, key=lambda l: len(l) if len(l) < 200 else 0)
+            paper_title = st.session_state.metadata.get('title')
+            if not paper_title:
+                lines = [l.strip() for l in text.split('\n') if l.strip()]
+                candidate_lines = lines[:5] if len(lines) >= 5 else lines
+                if candidate_lines:
+                    paper_title = max(candidate_lines, key=lambda l: len(l) if len(l) < 200 else 0)
             st.session_state.paper_title = paper_title
             st.session_state.citations = fetch_scholar_citations(paper_title)
 
@@ -687,7 +884,7 @@ def render_sidebar():
 
         files = st.file_uploader("Upload PDF", type=['pdf'], accept_multiple_files=True, label_visibility="collapsed")
 
-        if st.button("🚀 Analyze Paper", type="primary", width="stretch"):
+        if st.button("Analyze Paper", type="primary", use_container_width=True):
             if files:
                 if process_pdf(files):
                     st.rerun()
@@ -695,11 +892,11 @@ def render_sidebar():
                 st.warning("Upload a PDF first")
 
         if st.session_state.processed:
-            st.success(f"✓ {st.session_state.filename}")
-            # Show extraction stats
+            st.success(f"Loaded: {st.session_state.filename}")
             img_count = len(st.session_state.images)
             eq_count = len(st.session_state.equations)
-            st.caption(f"📊 {img_count} images, {eq_count} equations found")
+            sec_count = len(st.session_state.sections)
+            st.caption(f"{img_count} images | {eq_count} equations | {sec_count} sections")
 
         st.divider()
 
@@ -709,18 +906,30 @@ def render_sidebar():
             index=1, horizontal=True, label_visibility="collapsed"
         )
 
+        # Section navigator (when paper is loaded)
+        if st.session_state.processed and st.session_state.sections:
+            st.divider()
+            st.markdown("**Paper Sections**")
+            for sec in st.session_state.sections:
+                label = f"{sec['number']} {sec['name']}" if sec['number'] else sec['name']
+                if st.button(f"  {label}", key=f"nav_{sec['position']}", use_container_width=True):
+                    ask(f"Summarize the '{sec['name']}' section of this paper.")
+                    st.rerun()
+
         st.divider()
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("Clear Chat", width="stretch"):
+            if st.button("Clear Chat", use_container_width=True):
                 st.session_state.messages = []
-                st.session_state.eq_explanations = {}
-                st.session_state.term_definitions = {}
+                if "eq_explanations" in st.session_state:
+                    st.session_state.eq_explanations = {}
+                if "term_definitions" in st.session_state:
+                    st.session_state.term_definitions = {}
                 st.session_state.conversation_manager.clear_history()
                 st.rerun()
         with c2:
-            if st.button("Reset All", width="stretch"):
+            if st.button("Reset All", use_container_width=True):
                 for k in list(st.session_state.keys()):
                     del st.session_state[k]
                 st.rerun()
@@ -728,31 +937,56 @@ def render_sidebar():
 
 def render_welcome():
     """Render welcome screen."""
-    st.markdown('<div class="welcome-title">📚 PaperMind</div>', unsafe_allow_html=True)
+    st.markdown('<div class="welcome-title">PaperMind</div>', unsafe_allow_html=True)
     st.markdown('<p class="welcome-sub">AI-Powered Research Paper Analysis</p>', unsafe_allow_html=True)
 
     st.markdown("""
-    <p style="text-align:center; color:#cbd5e1; max-width:550px; margin:0 auto 2rem; font-size: 1rem;">
-    Upload research papers and get instant explanations of complex concepts, equations, and figures.
+    <p style="text-align:center; color:#cbd5e1; max-width:600px; margin:0 auto 2rem; font-size: 1rem; line-height: 1.6;">
+    Upload a research paper and get instant access to AI-powered analysis.
+    PaperMind helps you understand complex papers faster.
     </p>
     """, unsafe_allow_html=True)
 
     cols = st.columns(4)
-    features = [("📖", "Glossary", "Technical terms explained"),
-                ("📐", "Equations", "Step-by-step math"),
-                ("🖼️", "Figures", "Image extraction"),
-                ("💬", "Q&A", "Ask anything")]
+    features = [
+        ("📖", "Smart Glossary", "Auto-detect technical terms with context and AI definitions"),
+        ("📐", "Equation Explainer", "Step-by-step breakdowns of mathematical formulas"),
+        ("🔍", "Section Navigator", "Jump to any section and get instant AI summaries"),
+        ("💬", "Research Q&A", "Ask complex questions and get cited answers"),
+    ]
     for i, (icon, title, desc) in enumerate(features):
         with cols[i]:
             st.markdown(f"""
-            <div class="card" style="text-align:center; min-height: 120px;">
-                <div style="font-size:1.75rem; margin-bottom: 0.5rem;">{icon}</div>
-                <div class="card-title">{title}</div>
-                <div class="card-content">{desc}</div>
+            <div class="feature-card">
+                <div class="feature-icon">{icon}</div>
+                <div class="feature-title">{title}</div>
+                <div class="feature-desc">{desc}</div>
             </div>
             """, unsafe_allow_html=True)
 
-    st.info("👈 Upload a PDF from the sidebar to begin")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Common research paper reading problems we solve
+    st.markdown('<div class="section-title">Problems We Solve</div>', unsafe_allow_html=True)
+    cols2 = st.columns(2)
+    problems = [
+        ("Dense jargon overload", "Auto-extracted glossary with one-click AI definitions for every technical term."),
+        ("Complex math without context", "Every equation is identified and can be explained step-by-step with variable definitions."),
+        ("Hard to find key information", "Section-by-section navigation with AI summaries lets you skip to what matters."),
+        ("No time to read 20+ pages", "Get a structured overview with stats, keywords, and an extractive summary in seconds."),
+        ("Losing track of notes", "Built-in note-taking tied to your paper session, exportable as a text file."),
+        ("Understanding figures & tables", "Extracted images with AI-powered figure descriptions on demand."),
+    ]
+    for i, (title, desc) in enumerate(problems):
+        with cols2[i % 2]:
+            st.markdown(f"""
+            <div class="problem-card">
+                <div class="problem-title">{title}</div>
+                <div class="problem-desc">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.info("Upload a PDF from the sidebar to begin")
 
 
 def render_overview():
@@ -761,57 +995,86 @@ def render_overview():
     if not analysis:
         return
 
-    # Paper title
-    if st.session_state.paper_title:
-        st.markdown(f'<div class="card"><div class="card-title" style="font-size:1.1rem;">{sanitize_html(st.session_state.paper_title)}</div></div>', unsafe_allow_html=True)
+    metadata = st.session_state.metadata or {}
 
-    stats = analysis.get('stats', {})
-    st.markdown('<div class="section-title">📊 Document Statistics</div>', unsafe_allow_html=True)
+    # Paper metadata header
+    title = metadata.get('title') or st.session_state.paper_title or "Untitled Paper"
+    authors = metadata.get('authors', [])
+    year = metadata.get('year')
+    doi = metadata.get('doi')
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("📝 Words", stats.get('words', '-'))
-    c2.metric("⏱️ Read Time", stats.get('reading_time', '-'))
-    c3.metric("🖼️ Images", len(st.session_state.images))
-    c4.metric("📐 Equations", len(st.session_state.equations))
+    title_html = sanitize_html(title)
+    authors_html = ", ".join(sanitize_html(a) for a in authors) if authors else ""
+    meta_items = []
+    if year:
+        meta_items.append(f'<span class="paper-meta-item">Year: {sanitize_html(year)}</span>')
+    if doi:
+        meta_items.append(f'<span class="paper-meta-item">DOI: {sanitize_html(doi)}</span>')
 
-    # Citation count
     citations_data = st.session_state.citations
     if citations_data and citations_data.get('citations') is not None:
-        c5.metric("📚 Citations", f"{citations_data['citations']:,}")
-    else:
-        c5.metric("📚 Citations", "N/A")
+        meta_items.append(f'<span class="paper-meta-item">Cited: {citations_data["citations"]:,} times</span>')
+
+    st.markdown(f"""
+    <div class="paper-header">
+        <div class="paper-title-main">{title_html}</div>
+        {"<div class='paper-authors'>" + authors_html + "</div>" if authors_html else ""}
+        <div>{"".join(meta_items)}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Google Scholar link
     if citations_data and citations_data.get('scholar_url'):
         scholar_url = citations_data['scholar_url']
-        citation_count = citations_data.get('citations')
-        if citation_count is not None:
-            st.markdown(
-                f'<div class="card">'
-                f'<div class="card-title">📚 Google Scholar</div>'
-                f'<div class="card-content">This paper has been cited <strong>{citation_count:,}</strong> times. '
-                f'<a href="{scholar_url}" target="_blank" style="color: #a78bfa;">View on Google Scholar →</a></div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        elif citations_data.get('error'):
-            st.markdown(
-                f'<div class="card">'
-                f'<div class="card-title">📚 Google Scholar</div>'
-                f'<div class="card-content">Could not fetch citation data. '
-                f'<a href="{scholar_url}" target="_blank" style="color: #a78bfa;">Search on Google Scholar →</a></div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f'<div class="card">'
+            f'<div class="card-content"><a href="{scholar_url}" target="_blank" '
+            f'style="color: #a78bfa;">View on Google Scholar</a></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.markdown('<div class="section-title">📋 Summary</div>', unsafe_allow_html=True)
+    # Stats
+    stats = analysis.get('stats', {})
+    st.markdown('<div class="section-title">Document Statistics</div>', unsafe_allow_html=True)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Words", f"{stats.get('words', 0):,}")
+    c2.metric("Read Time", stats.get('reading_time', '-'))
+    c3.metric("Sections", len(st.session_state.sections))
+    c4.metric("Images", len(st.session_state.images))
+    c5.metric("Equations", len(st.session_state.equations))
+
+    # Summary
+    st.markdown('<div class="section-title">Summary</div>', unsafe_allow_html=True)
     if analysis.get('summary'):
-        st.info(analysis['summary'])
+        st.markdown(f"""
+        <div class="card">
+            <div class="card-content">{sanitize_html(analysis['summary'])}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown('<div class="section-title">🏷️ Key Topics</div>', unsafe_allow_html=True)
-    keywords = analysis.get('keywords', [])[:12]
+    # Section breakdown
+    sections = st.session_state.sections
+    if sections:
+        st.markdown('<div class="section-title">Paper Structure</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-nav">', unsafe_allow_html=True)
+        for sec in sections:
+            num = sanitize_html(sec['number'])
+            name = sanitize_html(sec['name'])
+            st.markdown(f"""
+            <div class="section-nav-item">
+                <span class="section-num">{num}</span>{name}
+                <span class="section-page">p.{sec['page']}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Keywords
+    st.markdown('<div class="section-title">Key Topics</div>', unsafe_allow_html=True)
+    keywords = analysis.get('keywords', [])[:15]
     if keywords:
-        html = "".join([f'<span class="keyword">{k}</span>' for k in keywords])
+        html = "".join([f'<span class="keyword">{sanitize_html(k)}</span>' for k in keywords])
         st.markdown(html, unsafe_allow_html=True)
 
 
@@ -819,7 +1082,7 @@ def render_equations():
     """Render equations tab with proper display."""
     equations = st.session_state.equations
 
-    st.markdown('<div class="section-title">📐 Mathematical Equations</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Mathematical Equations</div>', unsafe_allow_html=True)
 
     if not equations:
         st.markdown("""
@@ -869,7 +1132,7 @@ def render_figures():
     images = st.session_state.images
     paper = st.session_state.paper
 
-    st.markdown('<div class="section-title">🖼️ Figures & Images</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Figures & Images</div>', unsafe_allow_html=True)
 
     if not images:
         st.markdown("""
@@ -948,9 +1211,9 @@ def render_figures():
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.image(img_data['image'], width="stretch")
+                    st.image(img_data['image'], use_container_width=True)
 
-                    if st.button(f"🔍 Explain figures on this page", key=f"explain_page_{img_data['page']}"):
+                    if st.button(f"Explain figures on this page", key=f"explain_page_{img_data['page']}"):
                         ask(f"Describe and explain any figures, charts, tables, or diagrams that appear on page {img_data['page']} of this paper.")
                         st.rerun()
                     break
@@ -978,7 +1241,7 @@ def render_figures():
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
-                                st.image(img_data['image'], width="stretch")
+                                st.image(img_data['image'], use_container_width=True)
 
     # Also show figure references from text analysis
     if paper:
@@ -1007,13 +1270,18 @@ def render_terms():
         return
 
     terms = paper.get('terms', [])[:15]
-    st.markdown('<div class="section-title">📖 Technical Terms</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Technical Terms</div>', unsafe_allow_html=True)
 
     if not terms:
         st.caption("No technical terms detected.")
         return
 
     st.markdown(f"Found **{len(terms)}** key technical terms:")
+
+    # Search/filter terms
+    term_search = st.text_input("Filter terms", placeholder="Type to filter...", label_visibility="collapsed")
+    if term_search:
+        terms = [t for t in terms if term_search.lower() in t.term.lower()]
 
     # Track term definitions
     if "term_definitions" not in st.session_state:
@@ -1060,17 +1328,33 @@ def render_terms():
 
 def render_chat():
     """Render chat interface."""
-    st.markdown('<div class="section-title">⚡ Quick Actions</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Quick Actions</div>', unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    actions = [("✨ Summary", "Provide a comprehensive summary of this paper."),
-               ("💡 Takeaways", "What are the key takeaways and main contributions?"),
-               ("📐 Equations", "Explain the main mathematical equations in this paper."),
-               ("🧠 Prerequisites", "What background knowledge is needed to understand this paper?")]
+    actions = [
+        ("Summary", "Provide a comprehensive summary of this paper including the main problem, approach, and results."),
+        ("Key Takeaways", "What are the key takeaways, main contributions, and novel aspects of this paper?"),
+        ("Methodology", "Explain the methodology and approach used in this paper step by step."),
+        ("Prerequisites", "What background knowledge and prerequisites are needed to understand this paper?"),
+    ]
 
     for i, (label, q) in enumerate(actions):
         with [c1, c2, c3, c4][i]:
-            if st.button(label, width="stretch"):
+            if st.button(label, use_container_width=True):
+                ask(q)
+                st.rerun()
+
+    # Additional quick actions row
+    c5, c6, c7, c8 = st.columns(4)
+    actions2 = [
+        ("Limitations", "What are the limitations and potential weaknesses of this paper?"),
+        ("Comparisons", "How does this work compare to existing methods and baselines?"),
+        ("Future Work", "What future research directions does this paper suggest?"),
+        ("Datasets", "What datasets and evaluation metrics are used in this paper?"),
+    ]
+    for i, (label, q) in enumerate(actions2):
+        with [c5, c6, c7, c8][i]:
+            if st.button(label, use_container_width=True):
                 ask(q)
                 st.rerun()
 
@@ -1079,20 +1363,23 @@ def render_chat():
     # Messages
     for msg in st.session_state.messages:
         if msg["role"] == "user":
-            st.markdown(f'<div class="user-msg">{msg["content"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="user-msg">{sanitize_html(msg["content"])}</div>', unsafe_allow_html=True)
         else:
+            content = msg["content"]
             sources_html = ""
             if msg.get("sources"):
-                sources_html = '<div class="source-ref">' + "<br>".join([f"📍 {s}" for s in msg["sources"]]) + '</div>'
-            st.markdown(f'<div class="ai-msg">{msg["content"]}{sources_html}</div>', unsafe_allow_html=True)
+                sources_html = '<div class="source-ref">' + "<br>".join(
+                    [f"Source: {sanitize_html(s)}" for s in msg["sources"]]
+                ) + '</div>'
+            st.markdown(f'<div class="ai-msg">{content}{sources_html}</div>', unsafe_allow_html=True)
 
     # Suggested questions
     if not st.session_state.messages:
         analysis = st.session_state.analysis
         if analysis and analysis.get('suggested_questions'):
-            st.markdown('<div class="section-title">💡 Suggested Questions</div>', unsafe_allow_html=True)
-            for q in analysis['suggested_questions'][:3]:
-                if st.button(f"→ {q}", key=f"sq_{hash(q)}"):
+            st.markdown('<div class="section-title">Suggested Questions</div>', unsafe_allow_html=True)
+            for q in analysis['suggested_questions'][:4]:
+                if st.button(f"{q}", key=f"sq_{hash(q)}"):
                     ask(q)
                     st.rerun()
 
@@ -1101,6 +1388,180 @@ def render_chat():
     if question:
         ask(question)
         st.rerun()
+
+
+def render_search():
+    """Render text search tab."""
+    st.markdown('<div class="section-title">Search Paper</div>', unsafe_allow_html=True)
+
+    search_query = st.text_input("Search for keywords or phrases in the paper",
+                                  placeholder="e.g., attention mechanism, loss function, dataset...",
+                                  label_visibility="collapsed")
+
+    if search_query and st.session_state.text:
+        text = st.session_state.text
+        query_lower = search_query.lower()
+        lines = text.split('\n')
+
+        results = []
+        for i, line in enumerate(lines):
+            if query_lower in line.lower():
+                start = max(0, i - 1)
+                end = min(len(lines), i + 2)
+                context = '\n'.join(lines[start:end])
+                char_pos = sum(len(lines[j]) + 1 for j in range(i))
+                page = max(1, char_pos // 3000 + 1)
+                results.append({
+                    'context': context,
+                    'page': page,
+                    'line': i + 1,
+                })
+
+        if results:
+            st.markdown(f"Found **{len(results)}** matches for \"{sanitize_html(search_query)}\":")
+            for r in results[:20]:
+                context_safe = sanitize_html(r['context'])
+                highlighted = re.sub(
+                    f'({re.escape(sanitize_html(search_query))})',
+                    r'<span class="search-highlight">\1</span>',
+                    context_safe,
+                    flags=re.IGNORECASE
+                )
+                st.markdown(f"""
+                <div class="search-result">
+                    <div style="color: #94a3b8; font-size: 0.75rem; margin-bottom: 0.25rem;">
+                        Page ~{r['page']} | Line {r['line']}
+                    </div>
+                    <div style="font-size: 0.85rem; line-height: 1.5;">{highlighted}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.caption(f"No matches found for \"{search_query}\"")
+    elif not search_query:
+        st.caption("Enter a search term to find specific content in the paper.")
+
+    # AI-powered semantic search
+    st.markdown('<div class="section-title">AI-Powered Search</div>', unsafe_allow_html=True)
+    ai_query = st.text_input("Ask a specific question to search semantically",
+                              placeholder="e.g., What dataset was used for training?",
+                              key="ai_search")
+    if ai_query:
+        if st.button("Search", key="ai_search_btn"):
+            ask(ai_query)
+            st.rerun()
+
+
+def render_notes():
+    """Render notes and annotations tab."""
+    st.markdown('<div class="section-title">Research Notes</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="card">
+        <div class="card-content">
+            Keep track of your thoughts, questions, and key insights as you read the paper.
+            Your notes are saved for the current session.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Add new note
+    new_note = st.text_area("Add a note", placeholder="Type your thoughts, questions, or key insights...",
+                             height=100, label_visibility="collapsed")
+    note_category = st.selectbox("Category", ["Insight", "Question", "Key Finding", "Critique", "Follow-up"],
+                                  label_visibility="collapsed")
+
+    if st.button("Add Note", type="primary"):
+        if new_note.strip():
+            st.session_state.notes.append({
+                'text': new_note.strip(),
+                'category': note_category,
+                'timestamp': datetime.now().strftime("%H:%M:%S"),
+            })
+            st.rerun()
+
+    # Display existing notes
+    if st.session_state.notes:
+        st.markdown(f'<div class="section-title">Your Notes ({len(st.session_state.notes)})</div>',
+                     unsafe_allow_html=True)
+
+        for i, note in enumerate(reversed(st.session_state.notes)):
+            category_colors = {
+                'Insight': '#8b5cf6', 'Question': '#f59e0b',
+                'Key Finding': '#10b981', 'Critique': '#ef4444', 'Follow-up': '#3b82f6',
+            }
+            color = category_colors.get(note['category'], '#8b5cf6')
+            st.markdown(f"""
+            <div class="note-card" style="border-left: 3px solid {color};">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <span style="color: {color}; font-weight: 600; font-size: 0.8rem;">{note['category']}</span>
+                    <span class="note-timestamp">{note['timestamp']}</span>
+                </div>
+                <div class="card-content">{sanitize_html(note['text'])}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Export notes
+        st.markdown("---")
+        export_content = _build_export_content()
+        st.download_button(
+            "Export Notes & Summary",
+            data=export_content,
+            file_name=f"papermind_notes_{st.session_state.filename or 'paper'}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    else:
+        st.caption("No notes yet. Start adding notes as you read!")
+
+
+def _build_export_content() -> str:
+    """Build export content with summary and notes."""
+    lines = []
+    lines.append("=" * 60)
+    lines.append("PaperMind - Research Notes Export")
+    lines.append("=" * 60)
+    lines.append("")
+
+    title = st.session_state.paper_title or "Unknown Paper"
+    lines.append(f"Paper: {title}")
+    lines.append(f"File: {st.session_state.filename or 'N/A'}")
+    lines.append(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append("")
+
+    analysis = st.session_state.analysis
+    if analysis and analysis.get('summary'):
+        lines.append("-" * 40)
+        lines.append("SUMMARY")
+        lines.append("-" * 40)
+        lines.append(analysis['summary'])
+        lines.append("")
+
+    if analysis and analysis.get('keywords'):
+        lines.append("-" * 40)
+        lines.append("KEY TOPICS")
+        lines.append("-" * 40)
+        lines.append(", ".join(analysis['keywords'][:15]))
+        lines.append("")
+
+    if st.session_state.notes:
+        lines.append("-" * 40)
+        lines.append("RESEARCH NOTES")
+        lines.append("-" * 40)
+        for note in st.session_state.notes:
+            lines.append(f"[{note['category']}] ({note['timestamp']})")
+            lines.append(f"  {note['text']}")
+            lines.append("")
+
+    if st.session_state.messages:
+        lines.append("-" * 40)
+        lines.append("Q&A HISTORY")
+        lines.append("-" * 40)
+        for msg in st.session_state.messages:
+            role = "Q" if msg['role'] == 'user' else "A"
+            lines.append(f"{role}: {msg['content']}")
+            lines.append("")
+
+    return "\n".join(lines)
 
 
 def main():
@@ -1118,7 +1579,10 @@ def main():
     if not st.session_state.processed:
         render_welcome()
     else:
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["💬 Chat", "📊 Overview", "📐 Equations", "🖼️ Figures", "📖 Terms"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "Chat", "Overview", "Equations",
+            "Figures", "Terms", "Search", "Notes",
+        ])
         with tab1:
             render_chat()
         with tab2:
@@ -1129,6 +1593,10 @@ def main():
             render_figures()
         with tab5:
             render_terms()
+        with tab6:
+            render_search()
+        with tab7:
+            render_notes()
 
 
 if __name__ == '__main__':

@@ -74,7 +74,29 @@ class Config:
 
     def _load_env_variables(self):
         """Load API keys and tokens from environment variables."""
-        load_dotenv()
+        try:
+            load_dotenv()
+        except Exception:
+            # Handle BOM/UTF-16 encoded .env files (common on Windows)
+            env_path = os.path.join(os.getcwd(), '.env')
+            if os.path.exists(env_path):
+                try:
+                    with open(env_path, 'rb') as f:
+                        raw = f.read()
+                    # Try common encodings
+                    for encoding in ('utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be', 'latin-1'):
+                        try:
+                            content = raw.decode(encoding)
+                            for line in content.splitlines():
+                                line = line.strip()
+                                if line and not line.startswith('#') and '=' in line:
+                                    key, _, value = line.partition('=')
+                                    os.environ[key.strip()] = value.strip().strip('"').strip("'")
+                            break
+                        except (UnicodeDecodeError, ValueError):
+                            continue
+                except Exception:
+                    pass
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.huggingface_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
 

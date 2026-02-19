@@ -47,6 +47,17 @@ class DocumentAnalyzer:
         'new', 'first', 'well', 'also', 'us', 'use', 'used', 'many',
         'much', 'even', 'still', 'including', 'given', 'show', 'shows',
         'shown', 'see', 'e', 'g', 'eg', 'ie', 'etc', 'vs',
+        # Additional stopwords for research papers
+        'paper', 'section', 'method', 'approach', 'propose', 'proposed',
+        'present', 'presented', 'work', 'study', 'result', 'results',
+        'number', 'set', 'order', 'case', 'high', 'low', 'large', 'small',
+        'different', 'similar', 'previous', 'following', 'respectively',
+        'corresponding', 'according', 'compared', 'example', 'consider',
+        'note', 'able', 'get', 'got', 'take', 'taken', 'make', 'made',
+        'provide', 'provides', 'provide', 'total', 'only', 'without',
+        'within', 'among', 'across', 'per', 'via', 'like', 'specific',
+        'particular', 'general', 'overall', 'left', 'right', 'end',
+        'part', 'each', 'every', 'either', 'neither', 'rather',
     ])
 
     def __init__(self, config: Optional[Config] = None):
@@ -105,23 +116,52 @@ class DocumentAnalyzer:
             'characters': len(text),
         }
 
+    def _fix_reversed_text(self, text: str) -> str:
+        """Detect and fix reversed text from PDF extraction."""
+        common_words = frozenset([
+            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can',
+            'had', 'was', 'one', 'our', 'has', 'his', 'how', 'its', 'may',
+            'new', 'now', 'see', 'way', 'who', 'did', 'get', 'say', 'she',
+            'use', 'with', 'this', 'that', 'have', 'from', 'they', 'been',
+            'each', 'which', 'their', 'will', 'other', 'about', 'many',
+            'then', 'them', 'these', 'some', 'would', 'make', 'like',
+            'model', 'data', 'input', 'output', 'method', 'paper',
+        ])
+        words = text.split()
+        if len(words) < 10:
+            return text
+        sample = words[:min(80, len(words))]
+        normal_hits = sum(1 for w in sample if w.lower() in common_words)
+        reversed_hits = sum(1 for w in sample if w[::-1].lower() in common_words)
+        if reversed_hits > normal_hits * 2 and reversed_hits > 3:
+            return ' '.join(w[::-1] for w in words)
+        return text
+
     def _extract_summary(self, text: str, max_sentences: int = 5) -> str:
         """
         Extract a simple extractive summary by picking the most
         representative sentences from the beginning/abstract.
         """
-        # Try to find an abstract section
-        abstract_match = re.search(
-            r'(?:abstract|summary)\s*[:\n]\s*(.*?)(?:\n\s*(?:introduction|keywords|1\.|1\s))',
-            text,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if abstract_match:
-            abstract_text = abstract_match.group(1).strip()
-            # Clean and return up to max_sentences
-            sentences = re.split(r'(?<=[.!?])\s+', abstract_text)
-            sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-            return ' '.join(sentences[:max_sentences])
+        # Fix reversed text if needed
+        text = self._fix_reversed_text(text)
+
+        # Try to find an abstract section (multiple patterns)
+        abstract_patterns = [
+            r'(?:abstract|summary)\s*[:\n]\s*(.*?)(?:\n\s*(?:introduction|keywords|1\.|1\s|I\.))',
+            r'(?:abstract|summary)\s*\n+(.*?)(?:\n\s*\n)',
+            r'(?:^|\n)\s*abstract\s*\n(.*?)(?:\n\s*\n)',
+        ]
+
+        for pattern in abstract_patterns:
+            abstract_match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if abstract_match:
+                abstract_text = abstract_match.group(1).strip()
+                if len(abstract_text) > 50:
+                    # Clean and return up to max_sentences
+                    sentences = re.split(r'(?<=[.!?])\s+', abstract_text)
+                    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+                    if sentences:
+                        return ' '.join(sentences[:max_sentences])
 
         # Fallback: take the first meaningful sentences
         sentences = re.split(r'(?<=[.!?])\s+', text)
@@ -130,38 +170,54 @@ class DocumentAnalyzer:
 
     def _extract_keywords(self, text: str, top_n: int = 20) -> List[str]:
         """Extract top keywords using simple term frequency."""
+        # Fix reversed text if needed
+        text = self._fix_reversed_text(text)
+
         # Tokenize: lowercase, alphabetic words of length >= 3
         words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-        # Filter stopwords
-        filtered = [w for w in words if w not in self.STOPWORDS]
+        # Filter stopwords and very short/long words
+        filtered = [w for w in words
+                    if w not in self.STOPWORDS and 3 <= len(w) <= 25]
         # Count frequencies
         counter = Counter(filtered)
 
         # Also look for bigrams (two-word phrases)
         bigrams = []
         for i in range(len(filtered) - 1):
-            bigram = f"{filtered[i]} {filtered[i+1]}"
-            bigrams.append(bigram)
+            # Skip bigrams where both words are the same (duplicate noise)
+            if filtered[i] != filtered[i + 1]:
+                bigram = f"{filtered[i]} {filtered[i+1]}"
+                bigrams.append(bigram)
         bigram_counter = Counter(bigrams)
 
         # Combine: take top unigrams and top bigrams
-        top_unigrams = [word for word, _ in counter.most_common(top_n)]
+        top_unigrams = [word for word, count in counter.most_common(top_n * 2)
+                        if count >= 2]  # Require at least 2 occurrences
         top_bigrams = [
-            bg for bg, count in bigram_counter.most_common(10)
+            bg for bg, count in bigram_counter.most_common(15)
             if count >= 3
         ]
 
-        # Merge, preferring bigrams
+        # Merge, preferring bigrams, avoiding duplicates
         keywords = []
-        seen = set()
+        seen_words = set()
         for bg in top_bigrams[:8]:
+            bg_words = bg.split()
+            # Skip if bigram contains duplicate words
+            if len(set(bg_words)) < len(bg_words):
+                continue
             keywords.append(bg)
-            for w in bg.split():
-                seen.add(w)
+            for w in bg_words:
+                seen_words.add(w)
         for ug in top_unigrams:
-            if ug not in seen and len(keywords) < top_n:
+            if ug not in seen_words and len(keywords) < top_n:
+                # Skip words that look like reversed gibberish
+                # (no vowels or very unlikely character sequences)
+                vowels = set('aeiou')
+                if not vowels.intersection(ug):
+                    continue
                 keywords.append(ug)
-                seen.add(ug)
+                seen_words.add(ug)
 
         return keywords[:top_n]
 
