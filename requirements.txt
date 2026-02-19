@@ -20,6 +20,7 @@ faiss-cpu>=1.7.4
 
 # PDF Processing
 pdfplumber>=0.10.0
+PyMuPDF>=1.23.0
 
 # Utilities
 python-dotenv>=1.0.0

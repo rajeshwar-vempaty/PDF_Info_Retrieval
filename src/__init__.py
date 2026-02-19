@@ -10,6 +10,8 @@ from src.pdf_processor import PDFProcessor
 from src.text_processor import TextProcessor
 from src.vector_store import VectorStoreManager
 from src.conversation import ConversationManager
+from src.document_analyzer import DocumentAnalyzer
+from src.paper_analyzer import PaperAnalyzer
 
 __version__ = "1.0.0"
 __author__ = "PDF Info Retrieval Team"
@@ -20,4 +22,6 @@ __all__ = [
     "TextProcessor",
     "VectorStoreManager",
     "ConversationManager",
+    "DocumentAnalyzer",
+    "PaperAnalyzer",
 ]
