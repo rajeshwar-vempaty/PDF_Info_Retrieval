@@ -139,6 +139,49 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+try:
+    import urllib.request
+    import urllib.parse
+    HAS_URLLIB = True
+except ImportError:
+    HAS_URLLIB = False
+
+
+def fetch_scholar_citations(title: str) -> dict:
+    """
+    Fetch citation count from Google Scholar for a paper title.
+
+    Returns dict with 'citations', 'scholar_url', and 'error' keys.
+    """
+    result = {'citations': None, 'scholar_url': None, 'error': None}
+    if not HAS_URLLIB or not title:
+        result['error'] = 'Title not available'
+        return result
+
+    try:
+        query = urllib.parse.quote(title)
+        url = f"https://scholar.google.com/scholar?q={query}"
+        result['scholar_url'] = url
+
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+
+        # Look for "Cited by N" pattern
+        cited_match = re.search(r'Cited by\s+(\d+)', html)
+        if cited_match:
+            result['citations'] = int(cited_match.group(1))
+        else:
+            result['error'] = 'No citation data found'
+
+    except Exception as e:
+        result['error'] = str(e)
+        logger.debug(f"Scholar lookup failed: {e}")
+
+    return result
+
 
 # ==================== CSS ====================
 CSS = """
@@ -513,7 +556,8 @@ def init_state():
 
     defaults = [("messages", []), ("processed", False), ("analysis", None),
                 ("paper", None), ("text", ""), ("filename", None),
-                ("level", "detailed"), ("images", []), ("equations", [])]
+                ("level", "detailed"), ("images", []), ("equations", []),
+                ("citations", None), ("paper_title", None)]
     for key, val in defaults:
         if key not in st.session_state:
             st.session_state[key] = val
@@ -545,6 +589,17 @@ def process_pdf(files):
             chunks = st.session_state.text_processor.process(text)
             vectorstore = st.session_state.vectorstore_manager.create_vectorstore(chunks)
             st.session_state.conversation_manager.create_chain(vectorstore)
+
+        # Extract paper title (first non-empty line, likely the title)
+        with st.spinner("Looking up citations..."):
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            paper_title = lines[0] if lines else None
+            # Titles are usually the longest of the first few lines
+            candidate_lines = lines[:5] if len(lines) >= 5 else lines
+            if candidate_lines:
+                paper_title = max(candidate_lines, key=lambda l: len(l) if len(l) < 200 else 0)
+            st.session_state.paper_title = paper_title
+            st.session_state.citations = fetch_scholar_citations(paper_title)
 
         st.session_state.processed = True
         st.session_state.messages = []
@@ -595,7 +650,7 @@ def render_sidebar():
 
         files = st.file_uploader("Upload PDF", type=['pdf'], accept_multiple_files=True, label_visibility="collapsed")
 
-        if st.button("🚀 Analyze Paper", type="primary", use_container_width=True):
+        if st.button("🚀 Analyze Paper", type="primary", width="stretch"):
             if files:
                 if process_pdf(files):
                     st.rerun()
@@ -621,12 +676,14 @@ def render_sidebar():
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("Clear Chat", use_container_width=True):
+            if st.button("Clear Chat", width="stretch"):
                 st.session_state.messages = []
+                st.session_state.eq_explanations = {}
+                st.session_state.term_definitions = {}
                 st.session_state.conversation_manager.clear_history()
                 st.rerun()
         with c2:
-            if st.button("Reset All", use_container_width=True):
+            if st.button("Reset All", width="stretch"):
                 for k in list(st.session_state.keys()):
                     del st.session_state[k]
                 st.rerun()
@@ -667,14 +724,48 @@ def render_overview():
     if not analysis:
         return
 
+    # Paper title
+    if st.session_state.paper_title:
+        st.markdown(f'<div class="card"><div class="card-title" style="font-size:1.1rem;">{sanitize_html(st.session_state.paper_title)}</div></div>', unsafe_allow_html=True)
+
     stats = analysis.get('stats', {})
     st.markdown('<div class="section-title">📊 Document Statistics</div>', unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("📝 Words", stats.get('words', '-'))
     c2.metric("⏱️ Read Time", stats.get('reading_time', '-'))
     c3.metric("🖼️ Images", len(st.session_state.images))
     c4.metric("📐 Equations", len(st.session_state.equations))
+
+    # Citation count
+    citations_data = st.session_state.citations
+    if citations_data and citations_data.get('citations') is not None:
+        c5.metric("📚 Citations", f"{citations_data['citations']:,}")
+    else:
+        c5.metric("📚 Citations", "N/A")
+
+    # Google Scholar link
+    if citations_data and citations_data.get('scholar_url'):
+        scholar_url = citations_data['scholar_url']
+        citation_count = citations_data.get('citations')
+        if citation_count is not None:
+            st.markdown(
+                f'<div class="card">'
+                f'<div class="card-title">📚 Google Scholar</div>'
+                f'<div class="card-content">This paper has been cited <strong>{citation_count:,}</strong> times. '
+                f'<a href="{scholar_url}" target="_blank" style="color: #a78bfa;">View on Google Scholar →</a></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        elif citations_data.get('error'):
+            st.markdown(
+                f'<div class="card">'
+                f'<div class="card-title">📚 Google Scholar</div>'
+                f'<div class="card-content">Could not fetch citation data. '
+                f'<a href="{scholar_url}" target="_blank" style="color: #a78bfa;">Search on Google Scholar →</a></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown('<div class="section-title">📋 Summary</div>', unsafe_allow_html=True)
     if analysis.get('summary'):
@@ -704,6 +795,10 @@ def render_equations():
 
     st.markdown(f"Found **{len(equations)}** equations in the paper:")
 
+    # Track which equation explanations have been generated
+    if "eq_explanations" not in st.session_state:
+        st.session_state.eq_explanations = {}
+
     for eq in equations:
         st.markdown(f"""
         <div class="equation-card">
@@ -712,9 +807,24 @@ def render_equations():
         </div>
         """, unsafe_allow_html=True)
 
-        if st.button(f"🔍 Explain Equation {eq['id']}", key=f"eq_{eq['id']}"):
-            ask(f"Explain this equation step by step, defining each variable: {eq['content']}")
-            st.rerun()
+        eq_key = f"eq_{eq['id']}"
+
+        # Show existing explanation or explain button
+        if eq_key in st.session_state.eq_explanations:
+            with st.expander(f"Explanation for Equation {eq['id']}", expanded=True):
+                st.markdown(f'<div class="ai-msg">{st.session_state.eq_explanations[eq_key]}</div>', unsafe_allow_html=True)
+        else:
+            if st.button(f"🔍 Explain Equation {eq['id']}", key=eq_key):
+                with st.spinner(f"Explaining Equation {eq['id']}..."):
+                    try:
+                        response = st.session_state.conversation_manager.ask(
+                            f"Explain this equation step by step, defining each variable: {eq['content']}"
+                        )
+                        explanation = response.get('answer', 'Could not generate explanation.')
+                        st.session_state.eq_explanations[eq_key] = explanation
+                    except Exception as e:
+                        st.session_state.eq_explanations[eq_key] = f"Error: {e}"
+                st.rerun()
 
 
 def render_figures():
@@ -752,14 +862,40 @@ def render_figures():
         if page_images:
             st.markdown(f"**{len(page_images)} pages** rendered from the PDF:")
 
-            # Page selector
+            # Page selector with navigation callbacks
             page_nums = [img['page'] for img in page_images]
-            selected_page = st.selectbox(
-                "Jump to page:",
-                page_nums,
-                format_func=lambda x: f"Page {x}",
-                key="page_selector"
-            )
+
+            # Initialize page index in session state
+            if "page_idx" not in st.session_state:
+                st.session_state.page_idx = 0
+
+            # Clamp to valid range
+            st.session_state.page_idx = max(0, min(st.session_state.page_idx, len(page_nums) - 1))
+
+            # Navigation row
+            nav1, nav2, nav3 = st.columns([1, 3, 1])
+            with nav1:
+                if st.button("← Prev", key="prev_page", disabled=st.session_state.page_idx == 0):
+                    st.session_state.page_idx -= 1
+                    st.rerun()
+            with nav2:
+                def on_page_change():
+                    st.session_state.page_idx = page_nums.index(st.session_state._page_select)
+
+                st.selectbox(
+                    "Jump to page:",
+                    page_nums,
+                    index=st.session_state.page_idx,
+                    format_func=lambda x: f"Page {x}",
+                    key="_page_select",
+                    on_change=on_page_change,
+                )
+            with nav3:
+                if st.button("Next →", key="next_page", disabled=st.session_state.page_idx >= len(page_nums) - 1):
+                    st.session_state.page_idx += 1
+                    st.rerun()
+
+            selected_page = page_nums[st.session_state.page_idx]
 
             # Show selected page
             for img_data in page_images:
@@ -775,27 +911,12 @@ def render_figures():
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    st.image(img_data['image'], use_container_width=True)
+                    st.image(img_data['image'], width="stretch")
 
                     if st.button(f"🔍 Explain figures on this page", key=f"explain_page_{img_data['page']}"):
                         ask(f"Describe and explain any figures, charts, tables, or diagrams that appear on page {img_data['page']} of this paper.")
                         st.rerun()
                     break
-
-            # Navigation buttons
-            col1, col2, col3 = st.columns([1, 2, 1])
-            current_idx = page_nums.index(selected_page)
-
-            with col1:
-                if current_idx > 0:
-                    if st.button("← Previous"):
-                        st.session_state.page_selector = page_nums[current_idx - 1]
-                        st.rerun()
-            with col3:
-                if current_idx < len(page_nums) - 1:
-                    if st.button("Next →"):
-                        st.session_state.page_selector = page_nums[current_idx + 1]
-                        st.rerun()
 
     # Embedded images
     if fig_tab2 is not None:
@@ -820,7 +941,7 @@ def render_figures():
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
-                                st.image(img_data['image'], use_container_width=True)
+                                st.image(img_data['image'], width="stretch")
 
     # Also show figure references from text analysis
     if paper:
@@ -857,6 +978,10 @@ def render_terms():
 
     st.markdown(f"Found **{len(terms)}** key technical terms:")
 
+    # Track term definitions
+    if "term_definitions" not in st.session_state:
+        st.session_state.term_definitions = {}
+
     for term in terms:
         # Sanitize term name and context for HTML
         term_name = sanitize_html(term.term)
@@ -876,9 +1001,24 @@ def render_terms():
         </div>
         """, unsafe_allow_html=True)
 
-        if st.button(f"📖 Define '{term.term}'", key=f"term_{term.term}"):
-            ask(f"Define '{term.term}' in the context of this research paper. What does it mean and why is it important?")
-            st.rerun()
+        term_key = f"term_{term.term}"
+
+        # Show existing definition or define button
+        if term_key in st.session_state.term_definitions:
+            with st.expander(f"Definition of '{term.term}'", expanded=True):
+                st.markdown(f'<div class="ai-msg">{st.session_state.term_definitions[term_key]}</div>', unsafe_allow_html=True)
+        else:
+            if st.button(f"📖 Define '{term.term}'", key=term_key):
+                with st.spinner(f"Defining '{term.term}'..."):
+                    try:
+                        response = st.session_state.conversation_manager.ask(
+                            f"Define '{term.term}' in the context of this research paper. What does it mean and why is it important?"
+                        )
+                        definition = response.get('answer', 'Could not generate definition.')
+                        st.session_state.term_definitions[term_key] = definition
+                    except Exception as e:
+                        st.session_state.term_definitions[term_key] = f"Error: {e}"
+                st.rerun()
 
 
 def render_chat():
@@ -893,7 +1033,7 @@ def render_chat():
 
     for i, (label, q) in enumerate(actions):
         with [c1, c2, c3, c4][i]:
-            if st.button(label, use_container_width=True):
+            if st.button(label, width="stretch"):
                 ask(q)
                 st.rerun()
 
