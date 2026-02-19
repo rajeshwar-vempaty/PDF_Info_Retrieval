@@ -9,8 +9,10 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from langchain_openai import ChatOpenAI
-from langchain_classic.memory import ConversationBufferMemory
-from langchain_classic.chains import ConversationalRetrievalChain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.messages import HumanMessage, AIMessage
 
 from src.config import Config, default_config
 
@@ -46,7 +48,9 @@ class ConversationManager:
         """
         self.config = config or default_config
         self._chain = None
-        self._memory = None
+        self._retriever = None
+        self._llm = None
+        self._message_history: List = []  # List of HumanMessage/AIMessage
         self._chat_history: List[Dict[str, str]] = []
 
     @property
@@ -64,7 +68,7 @@ class ConversationManager:
         """Get the chat history."""
         return self._chat_history.copy()
 
-    def create_chain(self, vectorstore) -> ConversationalRetrievalChain:
+    def create_chain(self, vectorstore):
         """
         Create a conversational retrieval chain.
 
@@ -72,29 +76,52 @@ class ConversationManager:
             vectorstore: Vector store with document embeddings.
 
         Returns:
-            ConversationalRetrievalChain: Initialized conversation chain.
+            The initialized conversation chain.
 
         Raises:
             ConversationError: If chain creation fails.
         """
         try:
             # Initialize LLM
-            llm = ChatOpenAI(
+            self._llm = ChatOpenAI(
                 model_name=self.config.llm_model_name,
                 temperature=self.config.llm_temperature
             )
 
-            # Initialize conversation memory
-            self._memory = ConversationBufferMemory(
-                memory_key='chat_history',
-                return_messages=True
-            )
+            # Get retriever
+            self._retriever = vectorstore.as_retriever()
 
-            # Create the chain
-            self._chain = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=vectorstore.as_retriever(),
-                memory=self._memory
+            # Build the chain using LCEL
+            prompt = ChatPromptTemplate.from_messages([
+                ("system",
+                 "You are a helpful research assistant. Use the following "
+                 "context from research documents to answer the user's question. "
+                 "If you cannot find the answer in the context, say so clearly.\n\n"
+                 "Context:\n{context}"),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{question}"),
+            ])
+
+            def format_docs(docs):
+                return "\n\n".join(doc.page_content for doc in docs)
+
+            # Store retriever reference for source document access
+            self._last_source_docs = []
+
+            def retrieve_and_store(question):
+                docs = self._retriever.invoke(question)
+                self._last_source_docs = docs
+                return format_docs(docs)
+
+            self._chain = (
+                {
+                    "context": lambda x: retrieve_and_store(x["question"]),
+                    "question": lambda x: x["question"],
+                    "chat_history": lambda x: x["chat_history"],
+                }
+                | prompt
+                | self._llm
+                | StrOutputParser()
             )
 
             logger.info("Conversation chain created successfully")
@@ -118,7 +145,8 @@ class ConversationManager:
             validate_response: If True, validates response meets minimum length.
 
         Returns:
-            Dict containing 'answer', 'chat_history', and 'is_relevant'.
+            Dict containing 'answer', 'chat_history', 'is_relevant',
+            and 'source_documents'.
 
         Raises:
             ConversationError: If chain not initialized or query fails.
@@ -129,17 +157,16 @@ class ConversationManager:
             )
 
         try:
-            response = self._chain.invoke({'question': question})
+            self._last_source_docs = []
 
-            # Extract answer
-            answer = ""
-            if response.get('chat_history'):
-                # Get the last bot message (odd indices are bot responses)
-                messages = response['chat_history']
-                if len(messages) > 0:
-                    answer = messages[-1].content if hasattr(
-                        messages[-1], 'content'
-                    ) else str(messages[-1])
+            answer = self._chain.invoke({
+                "question": question,
+                "chat_history": self._message_history,
+            })
+
+            # Update message history for future context
+            self._message_history.append(HumanMessage(content=question))
+            self._message_history.append(AIMessage(content=answer))
 
             # Validate response relevance
             is_relevant = True
@@ -157,9 +184,9 @@ class ConversationManager:
 
             return {
                 'answer': answer,
-                'chat_history': response.get('chat_history', []),
+                'chat_history': self._message_history,
                 'is_relevant': is_relevant,
-                'source_documents': response.get('source_documents', [])
+                'source_documents': self._last_source_docs,
             }
 
         except Exception as e:
@@ -189,13 +216,14 @@ class ConversationManager:
     def clear_history(self):
         """Clear conversation history and memory."""
         self._chat_history = []
-        if self._memory:
-            self._memory.clear()
+        self._message_history = []
         logger.info("Conversation history cleared")
 
     def reset(self):
         """Reset the conversation manager completely."""
         self._chain = None
-        self._memory = None
+        self._retriever = None
+        self._llm = None
+        self._message_history = []
         self._chat_history = []
         logger.info("Conversation manager reset")
